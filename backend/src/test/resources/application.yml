@@ -17,3 +17,8 @@ spring:
 
 server:
   port: 0
+
+app:
+  jwt:
+    secret: bXktdmVyeS1sb25nLWRldi1qd3Qtc2VjcmV0LWtleS10aGF0LWlzLTMyLWJ5dGVzISE=
+    expiration-ms: 3600000

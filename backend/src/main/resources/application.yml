@@ -32,4 +32,11 @@ spring:
 server:
   port: ${PORT:8080}
 
+app:
+  jwt:
+    # MUST be set via environment variable in production (Render). Base64-encoded, at least 256 bits.
+    # Default below is for local development only and is NOT a real secret.
+    secret: ${JWT_SECRET:bXktdmVyeS1sb25nLWRldi1qd3Qtc2VjcmV0LWtleS10aGF0LWlzLTMyLWJ5dGVzISE=}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+
 # Render sets PORT env var; Supabase requires sslmode=require in DATABASE_URL
