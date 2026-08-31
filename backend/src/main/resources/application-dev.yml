@@ -1,0 +1,15 @@
+# Development profile - inherits from application.yml
+# Use a local PostgreSQL instance without needing Supabase.
+# Override only if needed; defaults in application.yml already support localhost.
+# Example: run with -Dspring.profiles.active=dev or SPRING_PROFILES_ACTIVE=dev
+
+spring:
+  jpa:
+    show-sql: true
+  flyway:
+    enabled: true
+
+logging:
+  level:
+    com.flighttracking: DEBUG
+    org.hibernate.SQL: DEBUG
