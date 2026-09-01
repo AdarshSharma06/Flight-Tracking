@@ -38,5 +38,12 @@ app:
     # Default below is for local development only and is NOT a real secret.
     secret: ${JWT_SECRET:bXktdmVyeS1sb25nLWRldi1qd3Qtc2VjcmV0LWtleS10aGF0LWlzLTMyLWJ5dGVzISE=}
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+  aviationstack:
+    api-key: ${AVIATIONSTACK_API_KEY:demo}
+    base-url: ${AVIATIONSTACK_BASE_URL:http://api.aviationstack.com/v1}
+    timeout-ms: ${AVIATIONSTACK_TIMEOUT_MS:5000}
+  open-meteo:
+    base-url: ${OPENMETEO_BASE_URL:https://api.open-meteo.com}
+    timeout-ms: ${OPENMETEO_TIMEOUT_MS:5000}
 
 # Render sets PORT env var; Supabase requires sslmode=require in DATABASE_URL

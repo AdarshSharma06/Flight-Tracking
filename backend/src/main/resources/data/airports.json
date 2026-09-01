@@ -1,0 +1,19 @@
+[
+  {"iata":"DEL","icao":"VIDP","name":"Indira Gandhi International Airport","city":"New Delhi","country":"India","latitude":28.5665,"longitude":77.1031,"timezone":"Asia/Kolkata","countryIso2":"IN"},
+  {"iata":"BOM","icao":"VABB","name":"Chhatrapati Shivaji Maharaj International Airport","city":"Mumbai","country":"India","latitude":19.0887,"longitude":72.8679,"timezone":"Asia/Kolkata","countryIso2":"IN"},
+  {"iata":"BLR","icao":"VOBL","name":"Kempegowda International Airport","city":"Bengaluru","country":"India","latitude":13.1986,"longitude":77.7066,"timezone":"Asia/Kolkata","countryIso2":"IN"},
+  {"iata":"MAA","icao":"VOMM","name":"Chennai International Airport","city":"Chennai","country":"India","latitude":12.9941,"longitude":80.1709,"timezone":"Asia/Kolkata","countryIso2":"IN"},
+  {"iata":"CCU","icao":"VECC","name":"Netaji Subhas Chandra Bose International Airport","city":"Kolkata","country":"India","latitude":22.6547,"longitude":88.4467,"timezone":"Asia/Kolkata","countryIso2":"IN"},
+  {"iata":"HYD","icao":"VOHS","name":"Rajiv Gandhi International Airport","city":"Hyderabad","country":"India","latitude":17.2313,"longitude":78.4298,"timezone":"Asia/Kolkata","countryIso2":"IN"},
+  {"iata":"JFK","icao":"KJFK","name":"John F Kennedy International Airport","city":"New York","country":"United States","latitude":40.6413,"longitude":-73.7781,"timezone":"America/New_York","countryIso2":"US"},
+  {"iata":"LAX","icao":"KLAX","name":"Los Angeles International Airport","city":"Los Angeles","country":"United States","latitude":33.9416,"longitude":-118.4085,"timezone":"America/Los_Angeles","countryIso2":"US"},
+  {"iata":"LHR","icao":"EGLL","name":"London Heathrow Airport","city":"London","country":"United Kingdom","latitude":51.47,"longitude":-0.4543,"timezone":"Europe/London","countryIso2":"GB"},
+  {"iata":"BOS","icao":"KBOS","name":"Logan International Airport","city":"Boston","country":"United States","latitude":42.3656,"longitude":-71.0096,"timezone":"America/New_York","countryIso2":"US"},
+  {"iata":"SFO","icao":"KSFO","name":"San Francisco International Airport","city":"San Francisco","country":"United States","latitude":37.6213,"longitude":-122.379,"timezone":"America/Los_Angeles","countryIso2":"US"},
+  {"iata":"DXB","icao":"OMDB","name":"Dubai International Airport","city":"Dubai","country":"United Arab Emirates","latitude":25.2532,"longitude":55.3657,"timezone":"Asia/Dubai","countryIso2":"AE"},
+  {"iata":"SIN","icao":"WSSS","name":"Singapore Changi Airport","city":"Singapore","country":"Singapore","latitude":1.3644,"longitude":103.9915,"timezone":"Asia/Singapore","countryIso2":"SG"},
+  {"iata":"CDG","icao":"LFPG","name":"Charles de Gaulle Airport","city":"Paris","country":"France","latitude":49.0097,"longitude":2.5479,"timezone":"Europe/Paris","countryIso2":"FR"},
+  {"iata":"FRA","icao":"EDDF","name":"Frankfurt Airport","city":"Frankfurt","country":"Germany","latitude":50.0379,"longitude":8.5622,"timezone":"Europe/Berlin","countryIso2":"DE"},
+  {"iata":"NRT","icao":"RJAA","name":"Narita International Airport","city":"Tokyo","country":"Japan","latitude":35.772,"longitude":140.3929,"timezone":"Asia/Tokyo","countryIso2":"JP"},
+  {"iata":"SYD","icao":"YSSY","name":"Sydney Kingsford Smith Airport","city":"Sydney","country":"Australia","latitude":-33.9399,"longitude":151.1753,"timezone":"Australia/Sydney","countryIso2":"AU"}
+]
