@@ -26,7 +26,8 @@ public class AviationStackClient {
 
     public AviationStackResponse searchFlights(String flightIata, String depIata, String arrIata,
                                                String airlineIata, String flightStatus, Integer limit) {
-        UriComponentsBuilder builder = UriComponentsBuilder.fromPath("/flights")
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(properties.baseUrl())
+                .path("/flights")
                 .queryParam("access_key", properties.apiKey());
         if (flightIata != null && !flightIata.isBlank()) builder.queryParam("flight_iata", flightIata);
         if (depIata != null && !depIata.isBlank()) builder.queryParam("dep_iata", depIata);
