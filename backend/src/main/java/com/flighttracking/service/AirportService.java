@@ -5,6 +5,7 @@ import com.flighttracking.client.AviationStackClient;
 import com.flighttracking.client.AviationStackResponse;
 import com.flighttracking.dto.airport.AirportDto;
 import com.flighttracking.dto.flight.FlightDto;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -20,6 +21,7 @@ public class AirportService {
         this.aviationStackClient = aviationStackClient;
     }
 
+    @Cacheable(value = "airports", key = "#iata.toUpperCase()")
     public AirportDto getAirport(String iata) {
         validateIata(iata);
         return airportClient.getByIata(iata);

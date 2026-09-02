@@ -4,6 +4,7 @@ import com.flighttracking.client.AirportClient;
 import com.flighttracking.client.OpenMeteoClient;
 import com.flighttracking.dto.airport.AirportDto;
 import com.flighttracking.dto.weather.WeatherDto;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -17,6 +18,7 @@ public class WeatherService {
         this.airportClient = airportClient;
     }
 
+    @Cacheable(value = "weather", key = "#latitude + ',' + #longitude")
     public WeatherDto getByCoordinates(double latitude, double longitude) {
         return openMeteoClient.getCurrentWeather(latitude, longitude);
     }

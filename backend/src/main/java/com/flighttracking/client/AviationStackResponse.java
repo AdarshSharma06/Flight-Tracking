@@ -26,7 +26,19 @@ public record AviationStackResponse(
             Airline airline,
             Flight flight,
             Aircraft aircraft,
-            Object live
+            Live live
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Live(
+            String updated,
+            Double latitude,
+            Double longitude,
+            Double altitude,
+            Double direction,
+            @JsonProperty("speed_horizontal") Double speedHorizontal,
+            @JsonProperty("speed_vertical") Double speedVertical,
+            @JsonProperty("is_ground") Boolean isGround
     ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
