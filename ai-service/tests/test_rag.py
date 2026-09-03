@@ -248,7 +248,7 @@ class TestChatServiceRAG:
         from app.llm.base import LLMClient, LLMResponse
 
         class MockLLM(LLMClient):
-            async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024):
+            async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024, tools=None):
                 # Verify RAG context was included in system prompt
                 system_msg = messages[0].content
                 self.last_system = system_msg
@@ -287,7 +287,7 @@ class TestChatServiceRAG:
         from app.llm.base import LLMClient, LLMResponse
 
         class MockLLM(LLMClient):
-            async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024):
+            async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024, tools=None):
                 self.last_system = messages[0].content
                 return LLMResponse(content="Hello!", model="test", usage={})
             def is_configured(self):
@@ -312,7 +312,7 @@ class TestChatServiceRAG:
         from app.llm.base import LLMClient, LLMResponse
 
         class MockLLM(LLMClient):
-            async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024):
+            async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024, tools=None):
                 return LLMResponse(content="General answer.", model="test", usage={})
             def is_configured(self):
                 return True
@@ -337,7 +337,7 @@ class TestChatServiceRAG:
         from app.llm.base import LLMClient, LLMResponse
 
         class MockLLM(LLMClient):
-            async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024):
+            async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024, tools=None):
                 return LLMResponse(content="Answer.", model="test", usage={})
             def is_configured(self):
                 return True
@@ -392,41 +392,49 @@ class TestRagEndpoints:
         """Stats endpoint should handle missing DB gracefully."""
         from httpx import AsyncClient, ASGITransport
         from app.main import app
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/ai/rag/stats")
-            # Should return 200 with zero stats if DB unavailable
-            assert response.status_code == 200
-            data = response.json()
-            assert "documents" in data
-            assert "chunks" in data
+        from app.config import get_settings
+        mock = type("M", (), {"ai_service_api_key": None, "spring_boot_base_url": "http://localhost:8080", "cors_origins": "http://localhost:3000", "log_level": "INFO", "environment": "test", "service_name": "test"})()
+        get_settings.cache_clear()
+        with patch("app.config.get_settings", return_value=mock), \
+             patch("app.main.get_settings", return_value=mock):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.get("/api/ai/rag/stats")
+                # Should return 200 with zero stats if DB unavailable
+                assert response.status_code == 200
+                data = response.json()
+                assert "documents" in data
+                assert "chunks" in data
 
     @pytest.mark.asyncio
     async def test_ingest_document_endpoint_validation(self):
         """Ingest endpoint should validate input."""
         from httpx import AsyncClient, ASGITransport
         from app.main import app
+        from app.config import get_settings
+        mock = type("M", (), {"ai_service_api_key": None, "spring_boot_base_url": "http://localhost:8080", "cors_origins": "http://localhost:3000", "log_level": "INFO", "environment": "test", "service_name": "test"})()
+        get_settings.cache_clear()
+        with patch("app.config.get_settings", return_value=mock), \
+             patch("app.main.get_settings", return_value=mock):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                # Empty title should fail
+                response = await client.post("/api/ai/rag/ingest", json={
+                    "title": "",
+                    "content": "Some content",
+                })
+                assert response.status_code == 422
 
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            # Empty title should fail
-            response = await client.post("/api/ai/rag/ingest", json={
-                "title": "",
-                "content": "Some content",
-            })
-            assert response.status_code == 422
+                # Empty content should fail
+                response = await client.post("/api/ai/rag/ingest", json={
+                    "title": "Test",
+                    "content": "",
+                })
+                assert response.status_code == 422
 
-            # Empty content should fail
-            response = await client.post("/api/ai/rag/ingest", json={
-                "title": "Test",
-                "content": "",
-            })
-            assert response.status_code == 422
-
-            # Missing fields should fail
-            response = await client.post("/api/ai/rag/ingest", json={})
-            assert response.status_code == 422
+                # Missing fields should fail
+                response = await client.post("/api/ai/rag/ingest", json={})
+                assert response.status_code == 422
 
 
 # ============================================================

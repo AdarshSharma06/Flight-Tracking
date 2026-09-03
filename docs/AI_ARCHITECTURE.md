@@ -123,6 +123,91 @@ The AI service consumes these **application-level capabilities**, not the raw ex
 | **Evaluation** | LangSmith / custom | Offline (golden sets) + online (user feedback) |
 | **Observability** | LangSmith / OpenTelemetry / custom | Traces, costs, latency, token usage |
 
+## H. AI-3: Tool Calling Architecture
+
+### Tool Abstraction
+
+Tools are defined as Python classes inheriting from `Tool` (in `app/tools/base.py`):
+
+```python
+class Tool(ABC):
+    name: str           # Unique tool name for LLM
+    description: str    # Shown to the LLM
+    parameters: dict    # JSON Schema for parameters
+    execute(**kwargs) -> ToolResult
+```
+
+Tools are registered in a global `ToolRegistry` and discovered by the LLM via OpenAI-compatible tool definitions.
+
+### Available Tools
+
+| Tool | Description | Spring Boot Endpoint |
+|------|-------------|---------------------|
+| `get_flight_status` | Flight status and details | `GET /api/ai/proxy/flights/{number}` |
+| `get_flight_tracking` | Live tracking/position | `GET /api/ai/proxy/flights/{number}/tracking` |
+| `get_airport_information` | Airport details | `GET /api/ai/proxy/airports/{iata}` |
+| `get_airport_departures` | Departing flights | `GET /api/ai/proxy/airports/{iata}/departures` |
+| `get_airport_arrivals` | Arriving flights | `GET /api/ai/proxy/airports/{iata}/arrivals` |
+| `get_weather` | Weather at airport | `GET /api/ai/proxy/weather/airport/{iata}` |
+| `search_flights` | Search flights by criteria | `GET /api/ai/proxy/flights/search` |
+
+### Communication Flow
+
+```
+User message
+    ↓
+ChatService (RAG check → system prompt → agentic loop)
+    ↓
+LLM (with tool definitions)
+    ↓
+LLM decides: answer directly OR call tool(s)
+    ↓
+ToolRegistry.execute(tool_name, args)
+    ↓
+Spring Boot proxy (/api/ai/proxy/*)
+    ↓
+Existing services → AviationStack / Open-Meteo / DB
+    ↓
+Tool result → LLM → Final natural language response
+```
+
+### Agentic Loop
+
+The `ChatService._agentic_loop()` method implements the tool-calling loop:
+1. Send messages + tool definitions to LLM
+2. If LLM returns tool_calls → execute each tool, append results to messages
+3. Re-send to LLM (up to 5 iterations)
+4. When LLM returns content (no tool_calls) → return final response
+
+### RAG + Tools Coexistence
+
+- **RAG** handles knowledge questions (keyword-matched: "what is", "explain" + aviation terms)
+- **Tools** handle live data questions (LLM-decided via tool calling)
+- RAG context is injected into the system prompt before tool calling begins
+- Both systems operate independently and do not conflict
+
+### Security
+
+- All tool execution goes through `ToolRegistry.execute()` — arbitrary tool names are rejected
+- Spring Boot proxy endpoints validate `X-AI-Service-Key` header
+- No direct access to aviation providers, databases, or arbitrary URLs
+- Tool arguments are validated against JSON Schema before execution
+- Live data fabrication is prevented by system prompt instructions
+
+### Production Configuration
+
+Required environment variables for the AI service:
+
+| Variable | Description |
+|----------|-------------|
+| `SPRING_BOOT_BASE_URL` | URL of deployed Spring Boot backend |
+| `AI_SERVICE_API_KEY` | Shared secret with Spring Boot |
+| `LLM_PROVIDER` | LLM provider (e.g., `openai-compatible`) |
+| `LLM_API_KEY` | LLM API key (e.g., OpenRouter key) |
+| `LLM_MODEL` | Model name (e.g., `nvidia/nemotron-3-super-120b-a12b:free`) |
+| `LLM_BASE_URL` | LLM API base URL |
+| `DATABASE_URL` | PostgreSQL connection (for RAG) |
+
 ---
 
-*This document defines the target architecture. AI-0 implements the foundation only (FastAPI service, Spring Boot client, contracts, DB schema docs). Actual AI features are deferred to AI-1+.*
+*This document defines the target architecture. AI-0 through AI-2 are complete. AI-3 implements tool calling for live flight, airport, and weather data.*

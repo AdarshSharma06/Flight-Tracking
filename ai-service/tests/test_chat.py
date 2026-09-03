@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from app.api.models import ChatRequest, ChatResponse
 from app.api.chat_service import ChatService
-from app.llm.base import LLMClient, LLMMessage, LLMResponse
+from app.llm.base import LLMClient, LLMMessage, LLMResponse, ToolCall
 
 
 class FakeLLMClient(LLMClient):
@@ -15,7 +15,7 @@ class FakeLLMClient(LLMClient):
         self.response_text = response_text
         self._configured = True
 
-    async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024):
+    async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024, tools=None):
         return LLMResponse(content=self.response_text, model="test-model", usage={})
 
     def is_configured(self):
@@ -25,7 +25,7 @@ class FakeLLMClient(LLMClient):
 class FailingLLMClient(LLMClient):
     """Mock LLM client that always fails."""
 
-    async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024):
+    async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024, tools=None):
         raise RuntimeError("LLM provider unavailable")
 
     def is_configured(self):
@@ -35,23 +35,52 @@ class FailingLLMClient(LLMClient):
 class UnconfiguredLLMClient(LLMClient):
     """Mock LLM client that reports not configured."""
 
-    async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024):
+    async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024, tools=None):
         raise RuntimeError("Should not be called")
 
     def is_configured(self):
         return False
 
 
+class ToolCallingLLMClient(LLMClient):
+    """Mock LLM that makes one tool call then responds."""
+
+    def __init__(self, tool_name: str, tool_args: dict, final_response: str = "Here is the result."):
+        self.tool_name = tool_name
+        self.tool_args = tool_args
+        self.final_response = final_response
+        self._call_count = 0
+        self._configured = True
+
+    async def complete(self, messages, model=None, temperature=0.7, max_tokens=1024, tools=None):
+        self._call_count += 1
+        if self._call_count == 1 and tools:
+            return LLMResponse(
+                content=None,
+                model="test-model",
+                tool_calls=[
+                    ToolCall(
+                        id="call_001",
+                        name=self.tool_name,
+                        arguments=self.tool_args,
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        return LLMResponse(content=self.final_response, model="test-model", usage={})
+
+    def is_configured(self):
+        return self._configured
+
+
 # --- ChatRequest validation ---
 
 def test_chat_request_min_length():
-    """Empty message should fail validation."""
     with pytest.raises(Exception):
         ChatRequest(message="")
 
 
 def test_chat_request_max_length():
-    """Message exceeding 4000 chars should fail validation."""
     with pytest.raises(Exception):
         ChatRequest(message="x" * 4001)
 
@@ -109,9 +138,7 @@ async def test_chat_service_no_secrets_in_response():
     service = ChatService(llm)
     req = ChatRequest(message="test")
     resp = await service.chat(req, "req-test-4")
-    # The response content comes from LLM - we verify the service doesn't add secrets
     assert resp.requestId == "req-test-4"
-    # Verify no API key fields in response
     resp_dict = resp.model_dump()
     assert "api_key" not in resp_dict
     assert "apiKey" not in resp_dict
@@ -122,29 +149,85 @@ async def test_chat_service_no_secrets_in_response():
 
 @pytest.mark.asyncio
 async def test_chat_endpoint_request_validation(async_client):
-    """Empty message should be rejected by Pydantic validation."""
-    response = await async_client.post("/api/ai/chat", json={"message": ""})
+    response = await async_client.post(
+        "/api/ai/chat",
+        json={"message": ""},
+        headers={"X-AI-Service-Key": "test-key"},
+    )
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_chat_endpoint_missing_message(async_client):
-    """Missing message field should be rejected."""
-    response = await async_client.post("/api/ai/chat", json={})
+    response = await async_client.post(
+        "/api/ai/chat",
+        json={},
+        headers={"X-AI-Service-Key": "test-key"},
+    )
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_chat_endpoint_no_secret_leakage(async_client):
-    """Response should not contain sensitive fields."""
     response = await async_client.post("/api/ai/chat", json={"message": "test"})
-    # Will return either 200 (if LLM configured) or 500 (if not)
-    # Either way, no secrets should leak
     if response.status_code == 200:
         data = response.json()
-        # Check response keys only contain expected fields
         assert set(data.keys()) == {"answer", "model", "requestId"}
-        # The answer may mention env var names in error messages (e.g. "set the llm_api_key env var")
-        # which is not a secret leak. Verify no actual key values appear.
         assert "sk-" not in data.get("answer", "")
         assert "Bearer " not in data.get("answer", "")
+
+
+# --- AI-3: Tool calling integration ---
+
+@pytest.mark.asyncio
+async def test_chat_service_tool_calling_flow():
+    """LLM requests a tool, tool executes, LLM responds."""
+    llm = ToolCallingLLMClient(
+        tool_name="get_flight_status",
+        tool_args={"flight_number": "AI302"},
+        final_response="Flight AI302 is currently on time.",
+    )
+    service = ChatService(llm)
+
+    from app.tools.base import ToolResult
+    with patch("app.api.chat_service.registry") as mock_reg:
+        mock_reg.get_definitions.return_value = [{"type": "function", "function": {"name": "get_flight_status"}}]
+        mock_reg.__len__ = lambda self: 1
+        mock_reg.execute = AsyncMock(return_value=ToolResult(success=True, data={"status": "active"}))
+
+        req = ChatRequest(message="Is AI302 delayed?")
+        resp = await service.chat(req, "req-tool-1")
+        assert resp.answer == "Flight AI302 is currently on time."
+        assert resp.model == "test-model"
+        assert llm._call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_chat_service_non_tool_chat_still_works():
+    """Normal chat without tools should work unchanged."""
+    llm = FakeLLMClient("ILS stands for Instrument Landing System.")
+    service = ChatService(llm)
+    req = ChatRequest(message="What is an ILS?")
+    resp = await service.chat(req, "req-notool-1")
+    assert resp.answer == "ILS stands for Instrument Landing System."
+
+
+@pytest.mark.asyncio
+async def test_chat_service_tool_failure_graceful():
+    """Tool failure should be reported to LLM, which gives a response."""
+    llm = ToolCallingLLMClient(
+        tool_name="get_flight_status",
+        tool_args={"flight_number": "INVALID"},
+        final_response="I couldn't retrieve flight data.",
+    )
+    service = ChatService(llm)
+
+    from app.tools.base import ToolResult
+    with patch("app.api.chat_service.registry") as mock_reg:
+        mock_reg.get_definitions.return_value = [{"type": "function", "function": {"name": "get_flight_status"}}]
+        mock_reg.__len__ = lambda self: 1
+        mock_reg.execute = AsyncMock(return_value=ToolResult(success=False, error="Flight not found"))
+
+        req = ChatRequest(message="Is flight XYZ999 delayed?")
+        resp = await service.chat(req, "req-tool-fail")
+        assert resp.answer == "I couldn't retrieve flight data."

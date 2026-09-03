@@ -1,13 +1,16 @@
-"""Chat service — orchestrates LLM calls with optional RAG retrieval."""
+"""Chat service — orchestrates LLM calls with RAG and tool calling."""
 
 import logging
 from typing import Optional
 
 from app.api.models import ChatRequest, ChatResponse
 from app.api.system_prompt import SYSTEM_PROMPT
-from app.llm.base import LLMClient, LLMMessage
+from app.llm.base import LLMClient, LLMMessage, LLMResponse
+from app.tools.registry import registry
 
 logger = logging.getLogger(__name__)
+
+MAX_TOOL_ITERATIONS = 5
 
 
 class ChatService:
@@ -28,15 +31,18 @@ class ChatService:
         # Build the system prompt with optional RAG context
         system_prompt = self._build_system_prompt(rag_context)
 
-        messages = [
+        messages: list[LLMMessage] = [
             LLMMessage(role="system", content=system_prompt),
             LLMMessage(role="user", content=request.message),
         ]
 
+        # Get tool definitions if any tools are registered
+        tool_defs = registry.get_definitions() if len(registry) > 0 else None
+
         try:
-            response = await self.llm_client.complete(messages)
+            response = await self._agentic_loop(messages, tool_defs)
             return ChatResponse(
-                answer=response.content,
+                answer=response.content or "I was unable to generate a response.",
                 model=response.model,
                 requestId=request_id,
             )
@@ -48,11 +54,59 @@ class ChatService:
                 requestId=request_id,
             )
 
-    async def _retrieve_rag_context(self, query: str) -> str:
-        """Retrieve RAG context if the query is suitable for knowledge retrieval.
+    async def _agentic_loop(
+        self,
+        messages: list[LLMMessage],
+        tool_defs: Optional[list[dict]],
+    ) -> LLMResponse:
+        """Run the agentic loop: call LLM, execute tools if needed, repeat."""
+        for iteration in range(MAX_TOOL_ITERATIONS):
+            response = await self.llm_client.complete(
+                messages,
+                tools=tool_defs,
+            )
 
-        Returns formatted context string, or empty string if RAG is not applicable.
-        """
+            # If no tool calls, return the final response
+            if not response.tool_calls:
+                return response
+
+            # Append the assistant message with tool calls
+            messages.append(
+                LLMMessage(
+                    role="assistant",
+                    content=response.content,
+                    tool_calls=[
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": __import__("json").dumps(tc.arguments),
+                            },
+                        }
+                        for tc in response.tool_calls
+                    ],
+                )
+            )
+
+            # Execute each tool call and append results
+            for tc in response.tool_calls:
+                logger.info("Tool call: %s(%s)", tc.name, tc.arguments)
+                result = await registry.execute(tc.name, tc.arguments)
+                messages.append(
+                    LLMMessage(
+                        role="tool",
+                        content=result.to_content(),
+                        tool_call_id=tc.id,
+                    )
+                )
+
+        # If we hit the iteration limit, return last response
+        logger.warning("Tool calling loop hit %d iterations", MAX_TOOL_ITERATIONS)
+        return response
+
+    async def _retrieve_rag_context(self, query: str) -> str:
+        """Retrieve RAG context if the query is suitable for knowledge retrieval."""
         try:
             from app.rag.retriever import should_use_rag, retrieve, format_retrieval_context
 
@@ -68,7 +122,6 @@ class ChatService:
             return context
 
         except Exception as e:
-            # RAG failure must not break the chat
             logger.warning("RAG retrieval failed (falling back to no-context): %s", e)
             return ""
 

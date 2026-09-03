@@ -23,11 +23,30 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting %s", settings.service_name)
+
+    # Register all tools
+    from app.tools import register_all_tools
+    register_all_tools()
+    from app.tools.registry import registry
+    logger.info("Registered %d tools: %s", len(registry), registry.tool_names)
+
     yield
-    # Clean up RAG database pool on shutdown
+
+    # Clean up resources on shutdown
+    try:
+        from app.tools.client import close_client
+        await close_client()
+    except Exception:
+        pass
     try:
         from app.rag.store import close_pool
         await close_pool()
+    except Exception:
+        pass
+    try:
+        from app.api.chat import _llm_client
+        if _llm_client:
+            await _llm_client.close()
     except Exception:
         pass
     logger.info("Shutting down %s", settings.service_name)
@@ -53,8 +72,6 @@ def create_app() -> FastAPI:
     )
 
     # Combined middleware: request ID + AI service key validation
-    # Starlette executes middleware in reverse registration order,
-    # so this single middleware handles both concerns in the correct sequence.
     @app.middleware("http")
     async def process_request(request: Request, call_next):
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
