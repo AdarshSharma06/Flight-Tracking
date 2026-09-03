@@ -2,7 +2,6 @@ import { createBrowserRouter } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import { RootLayout } from "@/layouts/RootLayout";
 import { NotFound } from "@/pages/NotFound";
-import { Placeholder } from "@/pages/Placeholder";
 import { HomePage } from "@/pages/HomePage";
 import { LoginPage } from "@/pages/LoginPage";
 import { RegisterPage } from "@/pages/RegisterPage";
@@ -16,6 +15,7 @@ const AirportDetailPage = lazy(() => import("@/pages/AirportDetailPage").then((m
 const AircraftPage = lazy(() => import("@/pages/AircraftPage").then((m) => ({ default: m.AircraftPage })));
 const AtcPage = lazy(() => import("@/pages/AtcPage").then((m) => ({ default: m.AtcPage })));
 const ProfilePage = lazy(() => import("@/pages/ProfilePage").then((m) => ({ default: m.ProfilePage })));
+const AiPage = lazy(() => import("@/pages/AiPage").then((m) => ({ default: m.AiPage })));
 
 function LazyFallback() {
   return (
@@ -49,7 +49,7 @@ export const router = createBrowserRouter([
       { path: "airports", element: withSuspense(<AirportsPage />) },
       { path: "airports/:iata", element: withSuspense(<AirportDetailPage />) },
       { path: "aircraft", element: withSuspense(<AircraftPage />) },
-      { path: "ai", element: <Placeholder title="AI Assistant" route="/ai" description="AI search, recommendations, and ATC explanations are future functionality. Navigation placeholder only — no AI implementation in Part 3." /> },
+      { path: "ai", element: withSuspense(<AiPage />) },
       {
         path: "atc",
         element: withSuspense(

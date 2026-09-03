@@ -51,6 +51,11 @@ app:
   cors:
     # Comma-separated list, configurable via env CORS_ALLOWED_ORIGINS for production React frontend
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+  ai:
+    # AI Service (FastAPI) - used for AI features
+    base-url: ${AI_SERVICE_BASE_URL:http://localhost:8001}
+    timeout-ms: ${AI_SERVICE_TIMEOUT_MS:5000}
+    api-key: ${AI_SERVICE_API_KEY:}
 
 # OpenAPI docs (springdoc) - available at /v3/api-docs and /swagger-ui.html
 springdoc:
