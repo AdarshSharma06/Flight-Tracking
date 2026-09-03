@@ -21,6 +21,9 @@ asyncpg==0.30.0
 # Embeddings (local, free, ONNX-based)
 fastembed==0.8.0
 
+# MCP (Model Context Protocol)
+mcp>=1.28,<2
+
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.24.0

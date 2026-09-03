@@ -30,6 +30,10 @@ async def lifespan(app: FastAPI):
     from app.tools.registry import registry
     logger.info("Registered %d tools: %s", len(registry), registry.tool_names)
 
+    # Register MCP tools (bridges to the same tool registry)
+    from app.mcp import register_mcp_tools
+    register_mcp_tools()
+
     yield
 
     # Clean up resources on shutdown
@@ -115,6 +119,15 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(chat_router, prefix="/api/ai")
     app.include_router(rag_router, prefix="/api/ai")
+
+    # Mount MCP server (SSE transport) at /mcp
+    try:
+        from app.mcp.server import get_mcp_sse_app
+        mcp_sse_app = get_mcp_sse_app()
+        app.mount("/mcp", mcp_sse_app)
+        logger.info("MCP server mounted at /mcp (SSE transport)")
+    except Exception as e:
+        logger.warning("Failed to mount MCP server: %s", e)
 
     return app
 

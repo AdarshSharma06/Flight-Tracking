@@ -208,6 +208,112 @@ Required environment variables for the AI service:
 | `LLM_BASE_URL` | LLM API base URL |
 | `DATABASE_URL` | PostgreSQL connection (for RAG) |
 
+## I. AI-4: MCP (Model Context Protocol) Architecture
+
+### Why MCP
+
+MCP provides a **standardized protocol** for exposing tools to AI systems. While AI-3 implemented tool calling via OpenAI-compatible function calling, MCP adds:
+
+1. **Interoperability**: Any MCP-compatible client (Claude Desktop, Cursor, etc.) can discover and use the aviation tools
+2. **Standardized schema**: Tool definitions follow the MCP specification, not just OpenAI's format
+3. **Separation of concerns**: The MCP layer provides a clean interface between the AI service and external consumers
+4. **Future-proofing**: As MCP adoption grows, the tools are immediately available to new AI platforms
+
+### Architecture (Option B)
+
+The application uses an **MCP adapter internally** while retaining the existing LLM tool-calling interface:
+
+```
+External MCP Clients (Claude Desktop, etc.)
+    ↓ (MCP Protocol: JSON-RPC over SSE)
+MCP Server (FastMCP at /mcp)
+    ↓
+ToolRegistry.execute()  ← same registry used by ChatService
+    ↓
+AI-3 Tool implementations (flight_tools, airport_tools, etc.)
+    ↓
+Spring Boot proxy (/api/ai/proxy/*)
+    ↓
+Existing services → AviationStack / Open-Meteo / DB
+```
+
+**Key decision**: The LLM (via ChatService) continues to use OpenAI-compatible function calling directly through the ToolRegistry. The MCP server is an **additional interface** that exposes the same tools via the MCP protocol. Both share the same underlying tool implementations — no duplication.
+
+### MCP Tools Exposed
+
+All 7 AI-3 aviation tools are exposed through MCP:
+
+| MCP Tool | Description | Underlying AI-3 Tool |
+|----------|-------------|---------------------|
+| `get_flight_status` | Flight status and details | `GetFlightStatusTool` |
+| `get_flight_tracking` | Live tracking/position | `GetFlightTrackingTool` |
+| `get_airport_information` | Airport details | `GetAirportInformationTool` |
+| `get_airport_departures` | Departing flights | `GetAirportDeparturesTool` |
+| `get_airport_arrivals` | Arriving flights | `GetAirportArrivalsTool` |
+| `get_weather` | Weather at airport | `GetWeatherTool` |
+| `search_flights` | Search flights by criteria | `SearchFlightsTool` |
+
+### MCP → AI-3 Tool Registry Relationship
+
+The MCP server delegates all tool calls to the existing `ToolRegistry`:
+
+```python
+@mcp.tool()
+async def get_flight_status(flight_number: str) -> str:
+    result = await registry.execute("get_flight_status", {"flight_number": flight_number})
+    return result.to_content()
+```
+
+This ensures:
+- **No duplicate implementations**: MCP tools are thin wrappers
+- **Consistent behavior**: Same validation, error handling, and Spring Boot communication
+- **Single source of truth**: Tool logic lives in `app/tools/`, not in `app/mcp/`
+
+### MCP → Spring Boot Relationship
+
+MCP tools do **not** directly access Spring Boot. The flow is:
+
+```
+MCP tool call → ToolRegistry → AI-3 Tool → Spring Boot proxy client → Spring Boot API
+```
+
+The AI-3 tool's `execute()` method calls `client.get()` which sends requests to Spring Boot's `/api/ai/proxy/*` endpoints with the `X-AI-Service-Key` header. This preserves the existing security boundary.
+
+### Authentication / Security
+
+- **MCP server itself**: No authentication required (it's an internal adapter)
+- **Tool execution**: Uses the same AI-3 `ToolRegistry.execute()` which validates tool names and arguments
+- **Spring Boot communication**: Uses the existing `AI_SERVICE_API_KEY` shared secret via `X-AI-Service-Key` header
+- **No secrets exposed**: MCP responses contain only tool results, never API keys, JWT tokens, or database credentials
+- **No direct aviation API access**: MCP tools go through Spring Boot, never directly to AviationStack/Aviation Edge
+
+### Transport
+
+The MCP server is mounted on FastAPI at `/mcp` using **SSE (Server-Sent Events)** transport:
+
+- `GET /mcp/sse` — SSE endpoint for receiving MCP messages
+- `POST /mcp/messages/` — Endpoint for sending MCP requests
+
+For local development, the MCP server can also run via **stdio** transport (for Claude Desktop integration).
+
+### Production Configuration
+
+No additional environment variables are required. The MCP server uses the same configuration as the AI service:
+
+| Variable | Description |
+|----------|-------------|
+| `SPRING_BOOT_BASE_URL` | Used by underlying AI-3 tools |
+| `AI_SERVICE_API_KEY` | Used by underlying AI-3 tools for Spring Boot auth |
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `app/mcp/__init__.py` | MCP package init |
+| `app/mcp/server.py` | MCP server with 7 aviation tools |
+| `tests/test_mcp.py` | 23 MCP tests |
+| `requirements.txt` | Added `mcp>=1.28,<2` dependency |
+
 ---
 
-*This document defines the target architecture. AI-0 through AI-2 are complete. AI-3 implements tool calling for live flight, airport, and weather data.*
+*This document defines the target architecture. AI-0 through AI-3 are complete. AI-4 implements MCP as the standardized tool interface.*
