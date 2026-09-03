@@ -1,0 +1,43 @@
+Airport Basics
+
+An airport is a designated area of land or water equipped with facilities for aircraft to take off, land, and operate. Airports serve as hubs for air transportation, connecting passengers and cargo to destinations worldwide.
+
+Key Components of an Airport
+
+Runways are paved or surfaced strips where aircraft accelerate for takeoff and decelerate after landing. Runways are identified by their magnetic heading, rounded to the nearest 10 degrees and divided by 10. For example, runway 09 points approximately 090 degrees (east), and runway 27 points approximately 270 degrees (west). Parallel runways are designated L (left), C (center), and R (right), such as 09L, 09C, and 09R.
+
+Taxiways are paths connecting runways to terminals, hangars, and other airport areas. Taxiways are identified by letters and numbers, such as Taxiway Alpha (A) or Taxiway Mike 5 (M5).
+
+Terminals are buildings where passengers check in, clear security, and board aircraft. Terminals contain gates, lounges, shops, and other passenger facilities.
+
+Aprons (also called ramps) are areas where aircraft park, load, and unload passengers and cargo. Ground support equipment operates on the apron.
+
+Hangars are large buildings used for aircraft storage and maintenance.
+
+Airport Reference Points
+
+The Airport Reference Point (ARP) is the approximate geometric center of the airport. It is used as a reference point for navigation and charting.
+
+Airport elevation is the height of the airport above mean sea level (MSL). It is critical for flight planning and approach procedures.
+
+Runway length varies based on the types of aircraft using the airport, elevation, temperature, and other factors. Major international airports typically have runways of 3,000 to 4,000 meters.
+
+Airport Codes
+
+IATA codes are three-letter codes assigned by the International Air Transport Association (IATA). Examples: DEL for Indira Gandhi International Airport, BLR for Kempegowda International Airport, LHR for London Heathrow.
+
+ICAO codes are four-letter codes assigned by the International Civil Aviation Organization (ICAO). Examples: VIDP for Delhi, VOBL for Bangalore, EGLL for Heathrow. The first letter indicates the region (V for India, E for Northern Europe).
+
+Airport Categories
+
+Airports are categorized by the types of aircraft they serve and the volume of traffic. In the United States, the FAA classifies airports as:
+
+Commercial Service airports handle scheduled airline operations with more than 2,500 passenger boardings per year. These are further categorized as:
+- Large hub: receives 1% or more of total U.S. commercial enplanements
+- Medium hub: receives 0.25% to 0.99%
+- Small hub: receives 0.05% to 0.24%
+- Non-hub: receives less than 0.05% but more than 2,500 boardings
+
+General Aviation airports serve non-scheduled operations and private aviation.
+
+Military airports are operated by armed forces.

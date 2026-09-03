@@ -1,0 +1,47 @@
+Squawk Codes and Transponder Operations
+
+A squawk code is a four-digit octal number (0-7) assigned to an aircraft by air traffic control (ATC) for identification and tracking purposes. The squawk code is entered into the aircraft's transponder, which broadcasts the code to ATC radar stations.
+
+Transponder Types
+
+Mode A transponders transmit the assigned squawk code, allowing ATC to identify the aircraft on radar.
+
+Mode C transponders additionally transmit the aircraft's altitude (pressure altitude in 100-foot increments), providing ATC with both identification and altitude information.
+
+Mode S (Select) transponders provide enhanced data link capabilities, including selective interrogation (only the addressed aircraft responds) and automatic dependent surveillance (ADS-B).
+
+Special Squawk Codes
+
+0000: Assigned by ATC when no specific code is required.
+
+1200: Visual Flight Rules (VFR) in the United States. Used by aircraft operating under VFR when not in contact with ATC.
+
+2000: Used by aircraft when entering a radar environment from a non-radar area, or when instructed by ATC.
+
+7000: IFR flights when not assigned a specific code by ATC (used in some countries).
+
+7500: Hijack code. If an aircraft squawks 7500, it indicates a hijacking situation. ATC will follow established hijack procedures.
+
+7600: Communication failure. If an aircraft squawks 7600, it indicates a loss of radio communication. ATC will follow established communication failure procedures.
+
+7700: Emergency. If an aircraft squawk 7700, it indicates an emergency situation. ATC will provide priority handling and assistance.
+
+Squawk Code Assignment
+
+ATC assigns squawk codes from a pool of available codes within a given radar area. The code is unique to each aircraft within a radar coverage area. When an aircraft moves from one radar area to another, it may be assigned a new squawk code.
+
+Transponder Operation
+
+Pilots set the assigned squawk code in the transponder before departure. The transponder automatically responds to radar interrogations with the squawk code and altitude (Mode C).
+
+If ATC instructs "Squawk IDENT," the pilot presses the IDENT button on the transponder. This causes a special identification signal to be transmitted, allowing ATC to quickly identify the aircraft on radar.
+
+SQUAWK MAYDAY: In an emergency, the pilot should set the transponder to 7700 and broadcast "Mayday" on the radio.
+
+Transponder Requirements
+
+Aircraft operating in controlled airspace (Class A, B, C, and D) are generally required to have an operating Mode C transponder.
+
+Aircraft operating under IFR in controlled airspace are required to have an operating Mode C transponder.
+
+Aircraft operating in certain airspace areas (such as Terminal Radar Service Areas) may be required to have an operating transponder.

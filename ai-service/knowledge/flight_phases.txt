@@ -1,0 +1,59 @@
+Flight Phases and Flight Levels
+
+Understanding the phases of flight and altitude assignments is essential for aviation operations. Each phase has specific procedures, performance considerations, and ATC requirements.
+
+Flight Phases
+
+Pre-flight: The pilot inspects the aircraft, reviews weather and NOTAMs, files a flight plan, and obtains an ATC clearance. Pre-flight includes checking fuel, oil, control surfaces, instruments, and communications equipment.
+
+Taxi: The aircraft moves from the parking area to the runway under its own power. Pilots follow taxiways and receive instructions from ground control.
+
+Takeoff roll: The pilot applies takeoff power and the aircraft accelerates along the runway. V1 is the decision speed beyond which the takeoff must continue. Vr is the rotation speed where the pilot pulls back on the controls to lift the nose. V2 is the takeoff safety speed that ensures safe climb with one engine inoperative.
+
+Initial climb: The aircraft climbs from the runway to the initial assigned altitude. Pilots follow the assigned heading or departure procedure.
+
+Climb: The aircraft continues climbing to the assigned cruising altitude. During climb, the pilot monitors engine performance, airspeed, and navigation.
+
+Cruise: The aircraft maintains a constant altitude and speed. Cruise is typically the longest phase of flight. Pilots monitor fuel consumption, weather, and navigation. ATC provides traffic advisories and routing changes.
+
+Descent: The aircraft descends from cruising altitude toward the destination. ATC assigns altitudes and vectors for approach. Pilots manage speed and configuration.
+
+Approach: The aircraft aligns with the runway and configures for landing. Approaches can be visual (pilot sees the runway) or instrument (using ILS, VOR, or GPS guidance).
+
+Landing: The aircraft touches down on the runway and decelerates. The pilot applies brakes, thrust reversers, and spoilers to slow down.
+
+Taxi to gate: After clearing the runway, the aircraft taxis to the gate or parking area under ground control instructions.
+
+Flight Levels
+
+Flight levels are pressure altitudes referenced to 1013.25 hPa (29.92 inHg). Flight levels are used above 18,000 feet MSL in most countries.
+
+FL180: 18,000 feet pressure altitude
+FL240: 24,000 feet pressure altitude
+FL290: 29,000 feet pressure altitude
+FL350: 35,000 feet pressure altitude
+FL390: 39,000 feet pressure altitude
+
+RVSM (Reduced Vertical Separation Minimum): Above FL290, the standard vertical separation is reduced from 2,000 feet to 1,000 feet in RVSM airspace. This allows more flight levels to be available, increasing airspace capacity.
+
+Altitude Assignment
+
+IFR flights are assigned specific altitudes or flight levels by ATC. The assigned altitude ensures separation from other traffic and terrain.
+
+VFR flights select their own altitude based on magnetic course:
+- Eastbound flights (000-179): odd flight levels plus 500 feet (e.g., 3,500, 5,500, 7,500)
+- Westbound flights (180-359): even flight levels plus 500 feet (e.g., 4,500, 6,500, 8,500)
+
+Cruising Levels
+
+The optimal cruising altitude depends on aircraft performance, weight, and route. Jet aircraft typically cruise between FL310 and FL410. Turboprop aircraft typically cruise between FL180 and FL280.
+
+Step climbs: As fuel burns off and the aircraft becomes lighter, the pilot may request a higher altitude for better fuel efficiency. ATC may approve a step climb when traffic permits.
+
+Altitude Restrictions
+
+Minimum safe altitudes: Aircraft must maintain an altitude that allows for an emergency landing without undue hazard to persons or property on the surface.
+
+Maximum altitude: Limited by aircraft performance, oxygen supply (above FL410 for most aircraft), and cabin pressurization.
+
+Terrain clearance: In mountainous areas, minimum en-route altitudes (MEAs) ensure adequate terrain and obstacle clearance along airways.

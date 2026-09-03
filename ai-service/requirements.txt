@@ -15,10 +15,15 @@ pydantic==2.10.0
 # Logging
 python-json-logger==2.0.7
 
+# Database (async PostgreSQL)
+asyncpg==0.30.0
+
+# Embeddings (local, free, ONNX-based)
+fastembed==0.8.0
+
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.24.0
-httpx==0.28.1
 
 # Type checking
 mypy==1.13.0

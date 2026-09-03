@@ -1,0 +1,57 @@
+Aviation Weather
+
+Aviation weather information is critical for safe flight operations. Pilots must understand weather phenomena, interpret weather reports and forecasts, and make informed decisions about flight planning and execution.
+
+Weather Reports and Forecasts
+
+METAR (Meteorological Aerodrome Report): A routine weather observation issued at least once per hour. METARs contain current conditions including wind, visibility, sky condition, temperature, dew point, altimeter setting, and any significant weather phenomena.
+
+Example METAR: DEL 031200Z 27010KT 3000 TSRA SCT030CB BKN100 32/25 Q1012
+
+Breaking this down:
+- DEL: Station identifier (Delhi)
+- 031200Z: Date and time (3rd at 1200Z)
+- 27010KT: Wind from 270 degrees at 10 knots
+- 3000: Visibility 3000 meters
+- TSRA: Thunderstorm with rain
+- SCT030CB: Scattered clouds at 3000 feet with cumulonimbus
+- BKN100: Broken clouds at 10,000 feet
+- 32/25: Temperature 32°C, dew point 25°C
+- Q1012: Altimeter 1012 hPa
+
+TAF (Terminal Aerodrome Forecast): A weather forecast for a specific airport, issued every 6 hours for major airports. TAFs cover a 24 to 30 hour period.
+
+SIGMET (Significant Meteorological Information): Weather advisories for significant weather phenomena affecting a wide area. SIGMETs cover phenomena such as severe turbulence, severe icing, thunderstorms, volcanic ash, and tropical cyclones.
+
+AIRMET (Airmen's Meteorological Information): Weather advisories for phenomena that may be hazardous to light aircraft, such as moderate turbulence, moderate icing, and mountain obscuration.
+
+Weather Phenomena
+
+Wind: Wind direction and speed are reported in knots. Wind direction is the direction from which the wind blows, measured clockwise from true north. A wind of 27010KT means wind from 270 degrees (west) at 10 knots.
+
+Gusts: Wind gusts are sudden increases in wind speed. A gust factor of 10 knots or more indicates gusty conditions.
+
+Wind shear: A sudden change in wind speed or direction over a short distance. Wind shear is particularly dangerous during takeoff and landing. Low-level wind shear occurs below 2,000 feet AGL.
+
+Thunderstorms: Thunderstorms contain severe turbulence, icing, hail, and microbursts. Cumulonimbus (CB) clouds indicate thunderstorm activity. Pilots should avoid thunderstorms by at least 20 nautical miles.
+
+Turbulence: Irregular air motion that causes aircraft to bounce or vibrate. Categories include:
+- Light: Slight, erratic changes in altitude or attitude
+- Moderate: Changes in altitude or attitude, but aircraft remains in control
+- Severe: Large, sudden changes in altitude or attitude, aircraft may be momentarily out of control
+- Extreme: Aircraft violently tossed, practically impossible to control
+
+Icing: Ice accumulation on aircraft surfaces. Structural icing occurs when supercooled water droplets freeze on contact with the aircraft. Icing degrades aerodynamic performance and can be dangerous.
+
+Visibility: The greatest distance at which objects can be seen and identified with the naked eye. Reduced visibility affects approach and landing minima.
+
+Ceiling: The height above ground level of the lowest layer of clouds reported as broken or overcast. A broken layer means 5/8 to 7/8 of the sky is covered. An overcast layer means 8/8 of the sky is covered.
+
+Weather Decision Making
+
+Pilots must evaluate weather conditions before and during flight. Key considerations include:
+- Current and forecast conditions at departure, destination, and alternate airports
+- En-route weather along the planned flight path
+- Aircraft performance limitations in various weather conditions
+- Personal minimums and experience level
+- Availability of alternates and escape routes

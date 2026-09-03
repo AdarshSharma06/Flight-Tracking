@@ -1,0 +1,71 @@
+Aircraft Basics
+
+An aircraft is a vehicle that is capable of flying through the atmosphere. Aircraft range from small single-engine airplanes to large commercial jetliners and helicopters. Understanding aircraft types, systems, and performance is fundamental to aviation.
+
+Aircraft Types
+
+Fixed-wing aircraft generate lift through forward motion. The wings produce an aerodynamic force that opposes gravity. Fixed-wing aircraft include:
+- Single-engine piston: small aircraft powered by one piston engine (e.g., Cessna 172)
+- Multi-engine piston: aircraft with two or more piston engines
+- Turboprop: aircraft powered by a turbine engine driving a propeller (e.g., ATR 72)
+- Jet: aircraft powered by turbofan or turbojet engines (e.g., Boeing 737, Airbus A320)
+- Regional jet: smaller jet aircraft for short to medium routes (e.g., Embraer E-Jets)
+
+Rotary-wing aircraft (helicopters) generate lift through rotating blades. Helicopters can hover, take off vertically, and land in small areas.
+
+Aircraft Components
+
+Fuselage: The main body of the aircraft, housing the cockpit, passengers, and cargo.
+
+Wings: The primary lifting surfaces. Wings generate lift through their airfoil shape. The wing's angle of attack, airspeed, and wing area determine the amount of lift produced.
+
+Empennage (tail section): Includes the horizontal stabilizer (provides pitch stability), vertical stabilizer (provides yaw stability), elevator (controls pitch), and rudder (controls yaw).
+
+Landing gear: Supports the aircraft on the ground. Types include tricycle gear (one nose wheel, two main gear) and taildragger gear (two main gear, one tail wheel).
+
+Powerplant: The engine and propeller or jet engine that provides thrust.
+
+Flight Controls
+
+Primary flight controls:
+- Ailerons: Control roll (banking left or right), located on the trailing edge of the wings
+- Elevator: Control pitch (nose up or down), located on the horizontal stabilizer
+- Rudder: Control yaw (nose left or right), located on the vertical stabilizer
+
+Secondary flight controls:
+- Flaps: Increase lift at low speeds for takeoff and landing
+- Slats: Leading-edge devices that delay stall at high angles of attack
+- Spoilers: Disrupt airflow over the wing to reduce lift and increase drag
+- Trim: Small surfaces that relieve control forces
+
+Aircraft Performance
+
+Lift is the aerodynamic force that opposes gravity. Lift depends on airspeed, air density, wing area, and the coefficient of lift. The lift equation is: L = 1/2 * rho * V^2 * S * CL
+
+Thrust is the forward force produced by the engines. Thrust must equal drag for constant-speed flight.
+
+Drag is the aerodynamic force that opposes motion. Types include:
+- Parasite drag: caused by the aircraft's shape and surface friction
+- Induced drag: caused by lift generation
+- Total drag: parasite drag plus induced drag
+
+Weight is the force of gravity acting on the aircraft. Weight includes the aircraft structure, fuel, passengers, and cargo.
+
+Aircraft Categories by Size
+
+Regional aircraft: 50-100 seats, short to medium range (e.g., ATR 72, Embraer E175)
+
+Narrow-body aircraft: 100-250 seats, short to medium range (e.g., Boeing 737, Airbus A320)
+
+Wide-body aircraft: 250-500+ seats, long range (e.g., Boeing 777, Airbus A350)
+
+Ultra-long-range aircraft: Designed for routes exceeding 8,000 nautical miles (e.g., Boeing 787, Airbus A350-900ULR)
+
+Aircraft Registration
+
+Aircraft are registered with national aviation authorities and display registration marks. The prefix indicates the country of registration:
+- VT- for India
+- N- for United States
+- G- for United Kingdom
+- D- for Germany
+- F- for France

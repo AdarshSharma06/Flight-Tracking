@@ -11,6 +11,7 @@ import logging
 from app.config import get_settings
 from app.api.health import router as health_router
 from app.api.chat import router as chat_router
+from app.api.rag import router as rag_router
 from app.observability.logging import setup_logging
 
 settings = get_settings()
@@ -23,6 +24,12 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Starting %s", settings.service_name)
     yield
+    # Clean up RAG database pool on shutdown
+    try:
+        from app.rag.store import close_pool
+        await close_pool()
+    except Exception:
+        pass
     logger.info("Shutting down %s", settings.service_name)
 
 
@@ -90,6 +97,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(chat_router, prefix="/api/ai")
+    app.include_router(rag_router, prefix="/api/ai")
 
     return app
 

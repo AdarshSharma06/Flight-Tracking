@@ -1,0 +1,40 @@
+Instrument Landing System (ILS)
+
+An Instrument Landing System (ILS) is a ground-based radio navigation system that provides precision guidance to aircraft during approach and landing. ILS is the most widely used precision approach system in the world, enabling aircraft to land in low-visibility conditions including fog, heavy rain, and snow.
+
+ILS Components
+
+The localizer provides lateral guidance, keeping the aircraft aligned with the runway centerline. The localizer transmits on a VHF frequency between 108.10 and 111.95 MHz. It sends two signals: one modulated at 90 Hz (left of centerline) and one at 150 Hz (right of centerline). The aircraft's ILS receiver compares these signals and displays a deviation indicator to the pilot.
+
+The glide slope (or glide path) provides vertical guidance, guiding the aircraft along the correct descent angle to the runway. The typical glide slope angle is 3 degrees above horizontal. The glide slope transmits on UHF frequencies between 329.15 and 335.00 MHz. Like the localizer, it uses 90 Hz (above glide path) and 150 Hz (below glide path) modulations.
+
+The marker beacons indicate distance from the runway during approach. There are typically three markers:
+- Outer Marker (OM): located 4 to 7 nautical miles from the runway threshold, transmitting at 400 Hz with blue lights
+- Middle Marker (MM): located 0.5 to 1 nautical miles from the threshold, transmitting at 1300 Hz with amber lights
+- Inner Marker (IM): located at the runway threshold, transmitting at 3000 Hz with white lights (used for CAT II/III approaches)
+
+ILS Categories
+
+ILS approaches are categorized by the minimum visibility and decision height required:
+
+CAT I: Decision height of 200 feet above touchdown zone elevation, with a runway visual range (RVR) of at least 1,800 feet (550 meters).
+
+CAT II: Decision height of 100 feet, with RVR of at least 1,200 feet (350 meters).
+
+CAT IIIA: Decision height of 50 feet or no decision height, with RVR of at least 700 feet (200 meters).
+
+CAT IIIB: No decision height, with RVR between 150 and 700 feet (50 to 200 meters).
+
+CAT IIIC: No decision height and no RVR limitation (zero-zero landing).
+
+ILS Signals and Coverage
+
+The localizer signal extends from the runway threshold to approximately 10 nautical miles. The signal covers an area of approximately 35 nautical miles along the approach path and 6 nautical miles either side of the centerline at the point of intercept.
+
+The glide slope signal extends from approximately 10 nautical miles from the runway to the touchdown zone.
+
+ILS Limitations
+
+ILS is a line-of-sight system and requires a clear signal path. Terrain, buildings, and other obstructions can interfere with ILS signals. ILS is also susceptible to interference from other ILS facilities operating on adjacent frequencies.
+
+ILS does not provide distance information. Pilots use DME (Distance Measuring Equipment) or marker beacons for distance reference.

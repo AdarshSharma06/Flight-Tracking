@@ -1,0 +1,39 @@
+VOR Navigation
+
+A VHF Omnidirectional Range (VOR) is a ground-based radio navigation aid that provides bearing information to aircraft. VOR is the backbone of the airway system and is used for en-route navigation and terminal area procedures.
+
+How VOR Works
+
+A VOR ground station transmits two VHF signals on the same frequency between 108.0 and 117.95 MHz. One signal is an omnidirectional reference signal, and the other is a rotating variable signal. The aircraft's VOR receiver compares the phase difference between these two signals to determine the bearing (radial) from the VOR station to the aircraft.
+
+The radial is a magnetic bearing extending outward from the VOR station. For example, the 090 radial extends eastward from the station. A pilot tracking the 090 radial is flying away from the station on an eastward heading.
+
+VOR Types
+
+Conventional VOR (CVOR) uses a small antenna at the top of the station that rotates to produce the variable signal. The reference signal is transmitted from a larger, stationary antenna array.
+
+Doppler VOR (DVOR) reverses the roles: the variable signal is produced by a large, rotating antenna array, and the reference signal comes from a small, stationary antenna. DVOR is less susceptible to errors from terrain and obstacles.
+
+VOR Accuracy
+
+VOR accuracy is typically within plus or minus 4 degrees under normal conditions. Errors increase at low altitudes and near the station due to terrain effects and signal propagation.
+
+VOR/DME combines a VOR with Distance Measuring Equipment (DME) to provide both bearing and distance from the station. This allows a pilot to determine their exact position by knowing the bearing and distance from a single ground station.
+
+VORTAC is a combined VOR and TACAN (Tactical Air Navigation) facility used by both civil and military aircraft. The VOR portion provides bearing information to civil aircraft, while TACAN provides both bearing and distance to military aircraft.
+
+VOR Airway System
+
+Victor airways are federal airways in the United States that extend from 1,200 feet AGL up to, but not including, 18,000 feet MSL. They are defined by VOR radials and are typically 8 nautical miles wide.
+
+Jet routes are airways at and above 18,000 feet MSL. They are defined by VOR radials and are typically 10 nautical miles wide.
+
+VOR Checkpoints
+
+Pilots are required to check VOR accuracy within 30 days before using VOR for IFR navigation. The check involves flying over a VOR checkpoint and verifying that the indicated bearing matches the published radial.
+
+VOR Limitations
+
+VOR signals are line-of-sight, meaning the aircraft must be within radio line-of-sight of the station. The range increases with altitude. At typical cruising altitudes, VOR range is approximately 100 to 200 nautical miles.
+
+VOR is subject to terrain interference, especially at low altitudes. Signals may be reflected by mountains, buildings, and other structures.

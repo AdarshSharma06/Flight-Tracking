@@ -169,7 +169,7 @@ CREATE TABLE rag_chunk (
     chunk_index INT NOT NULL,
     content TEXT NOT NULL,
     metadata JSONB DEFAULT '{}',
-    embedding VECTOR(1536), -- pgvector: 1536 dims for text-embedding-3-small
+    embedding VECTOR(384), -- pgvector: 384 dims for BAAI/bge-small-en-v1.5 (fastembed)
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -185,7 +185,7 @@ CREATE INDEX idx_rag_chunk_document_id ON rag_chunk(document_id);
 | `chunk_index` | INT | Sequential chunk number |
 | `content` | TEXT | Chunk text content |
 | `metadata` | JSONB | Extensible (page numbers, headings, etc.) |
-| `embedding` | VECTOR(1536) | pgvector embedding (text-embedding-3-small = 1536 dims) |
+| `embedding` | VECTOR(384) | pgvector embedding (BAAI/bge-small-en-v1.5 via fastembed = 384 dims) |
 | `created_at` | TIMESTAMPTZ | Creation timestamp |
 
 ---
@@ -248,17 +248,98 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE INDEX ON rag_chunk USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 ```
 
-**Embedding model**: `text-embedding-3-small` (1536 dimensions, cost-effective)
-- Alternative: `text-embedding-3-large` (3072 dims, higher quality)
-- Local option: `nomic-embed-text` (768 dims, via Ollama)
+**Embedding model**: `BAAI/bge-small-en-v1.5` via `fastembed` (384 dimensions, free, Apache-2.0, runs locally)
+- Chosen for: zero API cost, lightweight ONNX runtime (~100MB), no paid provider dependency
+- Alternative: `text-embedding-3-small` (1536 dims, requires OpenAI API key)
+- Alternative: `nomic-embed-text` (768 dims, via Ollama)
 
 ---
 
 ## Migration Strategy
 
 1. **Phase 1 (AI-0)**: Create `conversation`, `message`, `ai_execution` tables (no RAG yet)
-2. **Phase 2 (AI-1)**: Add `rag_document`, `rag_chunk`, enable `pgvector`
+2. **Phase 2 (AI-2)**: Add `rag_document`, `rag_chunk`, enable `pgvector` (V6 migration)
 3. **Phase 3 (AI-2+)**: Add `user_ai_preference` when personalization needed
+
+---
+
+## RAG Architecture (AI-2)
+
+### Overview
+
+```
+User Query
+    ↓
+RAG Retriever (should_use_rag check)
+    ↓
+fastembed (BAAI/bge-small-en-v1.5, 384 dims)
+    ↓
+pgvector cosine similarity search
+    ↓
+Top-K relevant chunks
+    ↓
+LLM System Prompt (augmented with context)
+    ↓
+Grounded Response
+```
+
+### Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Embedding Service | `app/rag/embedding.py` | Text → 384-dim vectors via fastembed |
+| Chunking | `app/rag/chunking.py` | Paragraph-aware text splitting |
+| Vector Store | `app/rag/store.py` | PostgreSQL + pgvector CRUD |
+| Retriever | `app/rag/retriever.py` | Query → embed → search → format |
+| Ingestion | `app/rag/ingestion.py` | Document → chunk → embed → store |
+| Chat Integration | `app/api/chat_service.py` | RAG-augmented chat flow |
+| Management API | `app/api/rag.py` | Ingestion endpoints + stats |
+
+### Ingestion Flow
+
+```
+Document (text file or API)
+    ↓
+Normalize text
+    ↓
+Chunk (500 chars, 100 overlap, paragraph-aware)
+    ↓
+Embed (fastembed, 384 dims, L2-normalized)
+    ↓
+Store in PostgreSQL (rag_document + rag_chunk tables)
+```
+
+### Retrieval Flow
+
+```
+User Question
+    ↓
+should_use_rag() — keyword matching
+    ↓
+embed_query() — fastembed
+    ↓
+search_similar() — pgvector cosine distance
+    ↓
+Top 3 chunks (threshold > 0.3)
+    ↓
+format_retrieval_context() — structured text
+    ↓
+Injected into LLM system prompt
+```
+
+### Knowledge Base Location
+
+```
+ai-service/knowledge/
+├── airport_basics.txt      (airport operations)
+├── ils.txt                 (Instrument Landing System)
+├── vor_navigation.txt      (VOR navigation)
+├── squawk_codes.txt        (transponder codes)
+├── atc_basics.txt          (air traffic control)
+├── aviation_weather.txt    (aviation meteorology)
+├── aircraft_basics.txt     (aircraft types/components)
+└── flight_phases.txt       (flight phases/levels)
+```
 
 ---
 
