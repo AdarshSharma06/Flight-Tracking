@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { atcService } from "@/services/atc.service";
 import { weatherService } from "@/services/weather.service";
 import { ApiError } from "@/services/api";
-import type { AnomalyResponse, PageResponse, TelemetryResponse, WeatherDto } from "@/types/api";
+import type { AnomalyResponse, AtcExplanationResponse, PageResponse, TelemetryResponse, WeatherDto } from "@/types/api";
 import { TrackingMap } from "@/components/tracking/TrackingMap";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Radar, ShieldAlert, Gauge, Navigation, MapPin, Clock, AlertCircle, RefreshCw, Plane, Thermometer, Wind, Droplets } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Radar, ShieldAlert, Gauge, Navigation, MapPin, Clock, AlertCircle, RefreshCw, Plane, Thermometer, Wind, Droplets, Sparkles, Bot } from "lucide-react";
 
 function isPageResponse<T>(v: unknown): v is PageResponse<T> {
   return typeof v === "object" && v !== null && "content" in v && "page" in v;
@@ -53,6 +54,9 @@ export function AtcPage() {
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [telemetryPageIdx, setTelemetryPageIdx] = useState(0);
   const [anomaliesPageIdx, setAnomaliesPageIdx] = useState(0);
+  const [explainingId, setExplainingId] = useState<number | null>(null);
+  const [explanation, setExplanation] = useState<AtcExplanationResponse | null>(null);
+  const [showExplanation, setShowExplanation] = useState(false);
 
   const fetchTelemetry = async (page = 0) => {
     setLoadingTelemetry(true);
@@ -150,6 +154,29 @@ export function AtcPage() {
       else alert("Status update failed.");
     } finally {
       setUpdatingId(null);
+    }
+  };
+
+  const handleExplain = async (anomalyId: number) => {
+    setExplainingId(anomalyId);
+    setExplanation(null);
+    setShowExplanation(true);
+    try {
+      const res = await atcService.explainAnomaly(anomalyId);
+      setExplanation(res);
+    } catch (e) {
+      let msg = "AI explanation is currently unavailable.";
+      if (e instanceof ApiError) msg = e.message;
+      setExplanation({
+        explanation: msg,
+        anomalyId,
+        flightNumber: null,
+        facts: [],
+        context: [],
+        limitations: [msg],
+      });
+    } finally {
+      setExplainingId(null);
     }
   };
 
@@ -325,6 +352,7 @@ export function AtcPage() {
                         <TableHead className="text-xs">Status</TableHead>
                         <TableHead className="text-xs">Description</TableHead>
                         <TableHead className="text-xs">Update</TableHead>
+                        <TableHead className="text-xs"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -346,6 +374,18 @@ export function AtcPage() {
                               </SelectContent>
                             </Select>
                           </TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs gap-1"
+                              onClick={() => handleExplain(a.id)}
+                              disabled={explainingId === a.id}
+                            >
+                              {explainingId === a.id ? <Skeleton className="size-3" /> : <Sparkles className="size-3" />}
+                              Explain
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -364,6 +404,63 @@ export function AtcPage() {
           <p className="text-[11px] text-muted-foreground">PATCH via <code className="bg-muted px-1 rounded">/api/atc/anomalies/{"{id}"}/status</code> with <code className="bg-muted px-1 rounded">{"{ status }"}</code> body. Frontend shows real <code className="bg-muted px-1 rounded">AnomalySeverity</code> + <code className="bg-muted px-1 rounded">AnomalyStatus</code> enums.</p>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={showExplanation} onOpenChange={setShowExplanation}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bot className="size-5" /> AI Explanation
+            </DialogTitle>
+            <DialogDescription>
+              Grounded explanation of anomaly data — not anomaly detection.
+            </DialogDescription>
+          </DialogHeader>
+
+          {explainingId && (
+            <div className="space-y-3 py-4">
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-20 w-full" />
+            </div>
+          )}
+
+          {explanation && !explainingId && (
+            <div className="space-y-4 text-sm">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Explanation</p>
+                <p className="whitespace-pre-wrap leading-relaxed">{explanation.explanation}</p>
+              </div>
+
+              {explanation.facts.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Measured Facts</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-xs">
+                    {explanation.facts.map((f, i) => <li key={i}>{f}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {explanation.context.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Context</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-xs">
+                    {explanation.context.map((c, i) => <li key={i}>{c}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {explanation.limitations.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Limitations</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-xs text-muted-foreground">
+                    {explanation.limitations.map((l, i) => <li key={i}>{l}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

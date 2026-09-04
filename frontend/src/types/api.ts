@@ -216,3 +216,13 @@ export interface AnomalyRequest {
   status?: string | null; // OPEN|INVESTIGATING|RESOLVED|FALSE_POSITIVE
   telemetryId?: number | null;
 }
+
+// Backend: com.flighttracking.ai.dto.AtcExplanationResponse
+export interface AtcExplanationResponse {
+  explanation: string;
+  anomalyId: number;
+  flightNumber: string | null;
+  facts: string[];
+  context: string[];
+  limitations: string[];
+}

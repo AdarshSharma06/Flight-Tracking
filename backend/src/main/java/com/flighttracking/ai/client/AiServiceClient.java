@@ -1,6 +1,8 @@
 package com.flighttracking.ai.client;
 
 import com.flighttracking.ai.dto.AiHealthResponse;
+import com.flighttracking.ai.dto.AtcExplanationRequest;
+import com.flighttracking.ai.dto.AtcExplanationResponse;
 import com.flighttracking.ai.dto.ChatRequest;
 import com.flighttracking.ai.dto.ChatResponse;
 import com.flighttracking.exception.ExternalApiException;
@@ -55,6 +57,26 @@ public class AiServiceClient {
             return response;
         } catch (RestClientException e) {
             log.error("AI service chat request failed: {}", e.getMessage());
+            throw new ExternalApiException("AI service error: " + e.getMessage(), e);
+        }
+    }
+
+    public AtcExplanationResponse explainAnomaly(AtcExplanationRequest request, String userId) {
+        try {
+            log.debug("Sending ATC explanation request to AI service for anomaly {}", request.anomalyId());
+            AtcExplanationResponse response = restClient.post()
+                    .uri("/api/ai/atc/explain")
+                    .header("X-User-Id", userId != null ? userId : "anonymous")
+                    .body(request)
+                    .retrieve()
+                    .body(AtcExplanationResponse.class);
+
+            if (response == null) {
+                throw new ExternalApiException("Empty response from AI service", 502);
+            }
+            return response;
+        } catch (RestClientException e) {
+            log.error("AI service ATC explanation request failed: {}", e.getMessage());
             throw new ExternalApiException("AI service error: " + e.getMessage(), e);
         }
     }

@@ -1,5 +1,5 @@
 import { Api } from "@/services/api";
-import type { AnomalyResponse, PageResponse, TelemetryResponse } from "@/types/api";
+import type { AnomalyResponse, AtcExplanationResponse, PageResponse, TelemetryResponse } from "@/types/api";
 
 export interface AtcTelemetryParams {
   flightNumber?: string;
@@ -56,6 +56,11 @@ export const atcService = {
   },
   createAnomaly(payload: Record<string, unknown>) {
     return Api.post<AnomalyResponse>("/api/atc/anomalies", payload);
+  },
+
+  // AI Explanation (AI-7)
+  explainAnomaly(anomalyId: number) {
+    return Api.post<AtcExplanationResponse>(`/api/atc/anomalies/${anomalyId}/explain`);
   },
 
   testAccess() {
