@@ -172,7 +172,7 @@ async def test_chat_endpoint_no_secret_leakage(async_client):
     response = await async_client.post("/api/ai/chat", json={"message": "test"})
     if response.status_code == 200:
         data = response.json()
-        assert set(data.keys()) == {"answer", "model", "requestId"}
+        assert set(data.keys()) == {"answer", "model", "requestId", "conversationId"}
         assert "sk-" not in data.get("answer", "")
         assert "Bearer " not in data.get("answer", "")
 

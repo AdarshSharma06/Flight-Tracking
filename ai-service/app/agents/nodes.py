@@ -63,7 +63,12 @@ def _extract_json_from_llm(text: str) -> dict:
 
 
 async def parse_preferences(state: RecommendationState, llm: LLMClient) -> dict:
-    """Parse user's natural language request into structured preferences using LLM."""
+    """Parse user's natural language request into structured preferences using LLM.
+
+    If preferences already exist in state (e.g., from stored user preferences),
+    LLM-extracted values override only non-null fields. This allows stored
+    preferences to serve as defaults while explicit request values take precedence.
+    """
     prompt = f"""Extract flight search preferences from this request. Return ONLY a JSON object.
 
 User request: "{state.user_request}"
@@ -89,16 +94,20 @@ Return JSON with these fields (use null for unknown/missing):
         )
         parsed = _extract_json_from_llm(response.content or "{}")
 
+        # Start with existing preferences (from stored memory) if present
+        existing = state.preferences or UserPreferences()
+
+        # LLM-extracted values override only non-null fields
         preferences = UserPreferences(
-            origin=parsed.get("origin"),
-            destination=parsed.get("destination"),
-            travel_date=parsed.get("travel_date"),
-            travel_time=parsed.get("travel_time"),
-            budget=parsed.get("budget"),
-            budget_currency=parsed.get("budget_currency"),
-            direct_only=bool(parsed.get("direct_only", False)),
-            airline_preference=parsed.get("airline_preference"),
-            other_preferences=parsed.get("other_preferences"),
+            origin=parsed.get("origin") or existing.origin,
+            destination=parsed.get("destination") or existing.destination,
+            travel_date=parsed.get("travel_date") or existing.travel_date,
+            travel_time=parsed.get("travel_time") or existing.travel_time,
+            budget=parsed.get("budget") or existing.budget,
+            budget_currency=parsed.get("budget_currency") or existing.budget_currency,
+            direct_only=parsed.get("direct_only") if parsed.get("direct_only") is not None else existing.direct_only,
+            airline_preference=parsed.get("airline_preference") or existing.airline_preference,
+            other_preferences=parsed.get("other_preferences") or existing.other_preferences,
         )
 
         errors = list(state.errors)

@@ -13,6 +13,7 @@ from app.api.health import router as health_router
 from app.api.chat import router as chat_router
 from app.api.rag import router as rag_router
 from app.api.recommendation import router as recommendation_router
+from app.api.memory import router as memory_router
 from app.observability.logging import setup_logging
 
 settings = get_settings()
@@ -49,6 +50,11 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
+        from app.memory.store import close_pool as close_memory_pool
+        await close_memory_pool()
+    except Exception:
+        pass
+    try:
         from app.api.chat import _llm_client
         if _llm_client:
             await _llm_client.close()
@@ -76,11 +82,15 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Combined middleware: request ID + AI service key validation
+    # Combined middleware: request ID + AI service key validation + user identity
     @app.middleware("http")
     async def process_request(request: Request, call_next):
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
         request.state.request_id = request_id
+
+        # Extract user identity from Spring Boot forwarded header
+        user_id = request.headers.get("X-User-Id")
+        request.state.user_id = user_id
 
         # Validate AI service key for /api/ routes
         cfg = get_settings()
@@ -121,6 +131,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router, prefix="/api/ai")
     app.include_router(rag_router, prefix="/api/ai")
     app.include_router(recommendation_router, prefix="/api/ai")
+    app.include_router(memory_router, prefix="/api/ai")
 
     # Mount MCP server (SSE transport) at /mcp
     try:

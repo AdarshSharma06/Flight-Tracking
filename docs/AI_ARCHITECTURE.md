@@ -505,7 +505,7 @@ Response:
 - Price prediction / price increase forecasting (→ AI-11)
 - Demand prediction (→ AI-11)
 - Airport congestion prediction (→ AI-11)
-- Conversation memory / preference memory (→ AI-6)
+- Conversation memory / preference memory (→ AI-6, now implemented)
 - Guardrails / PII scrubbing (→ AI-8)
 - Evaluation framework (→ AI-9)
 - Observability / tracing (→ AI-10)
@@ -526,4 +526,172 @@ Response:
 
 ---
 
-*This document defines the target architecture. AI-0 through AI-4 are complete. AI-5 implements the LangGraph-based flight recommendation agent.*
+*This document defines the target architecture. AI-0 through AI-5 are complete. AI-6 implements conversation and preference memory.*
+
+---
+
+## K. AI-6: Conversation and Preference Memory
+
+### Overview
+
+AI-6 adds persistent memory to the AI service, supporting two distinct types:
+
+1. **Conversation Memory** — contextual history for continuing interactions across messages
+2. **Preference Memory** — durable, structured user preferences for recommendations
+
+### Architecture
+
+```
+Frontend (React)
+  AiPage.tsx
+    → sends message + optional conversationId
+    → receives response + conversationId
+    ↓
+Spring Boot (Java)
+  AiController → AiServiceClient
+    → forwards X-User-Id header (username from JWT)
+    ↓
+FastAPI AI Service
+  POST /api/ai/chat
+    → middleware extracts X-User-Id
+    → ChatService
+      → get_or_create_conversation(user_id, conversation_id)
+      → get_conversation_context(user_id, conversation_id)
+      → LLM call with system prompt + history + current message
+      → persist user message + assistant response
+      → return response + conversationId
+    ↓
+PostgreSQL
+  ai_conversation, ai_message, ai_user_preference tables
+```
+
+### Conversation Memory
+
+**Storage:** PostgreSQL via asyncpg (separate pool from RAG, same DATABASE_URL)
+
+**Tables:**
+- `ai_conversation` — groups of related messages (id, user_id, title, timestamps)
+- `ai_message` — individual messages (id, conversation_id, role, content, timestamp)
+
+**Roles:** `user`, `assistant` only
+
+**Bounded Context:**
+- Maximum 20 recent messages per context window
+- Maximum 8,000 characters total content
+- Oldest messages trimmed first when budget exceeded
+- Conversation ownership verified on every retrieval
+
+**Conversation ID Flow:**
+1. Frontend sends optional `conversationId` in chat request
+2. If provided and valid, messages are appended to that conversation
+3. If absent or invalid, a new conversation is created
+4. Response always includes `conversationId` for follow-up messages
+
+### Preference Memory
+
+**Table:** `ai_user_preference` (user_id, preference_key, preference_value, unique constraint)
+
+**Valid Preference Keys:**
+| Key | Maps To | Example Values |
+|-----|---------|----------------|
+| `preferred_origin` | `origin` | `DEL`, `BOM` |
+| `preferred_destination` | `destination` | `LHR`, `SIN` |
+| `prefers_direct` | `direct_only` | `true`, `false` |
+| `preferred_airline` | `airline_preference` | `AI`, `BA` |
+| `budget_preference` | `budget` | `60000`, `500` |
+| `preferred_departure_time` | `travel_time` | `10:00`, `18:00` |
+| `preferred_arrival_time` | `arrival_time` | `14:00`, `08:00` |
+
+**Only valid structured keys are stored.** Arbitrary text is rejected.
+
+**Merging with AI-5 Recommendations:**
+1. Stored preferences loaded as defaults before recommendation graph runs
+2. `parse_preferences` node merges: LLM-extracted values override stored values
+3. Explicit request values always take precedence over stored preferences
+4. Null LLM values preserve stored defaults
+
+**What Is NOT Stored:**
+- Temporary trip details (dates, specific flights)
+- Hallucinated or inferred preferences
+- Sensitive personal information
+- Arbitrary prose or natural language
+
+### User Identity and Security
+
+**Identity Source:** `X-User-Id` header, forwarded by Spring Boot from JWT `authentication.getName()`
+
+**Middleware:** FastAPI extracts `X-User-Id` into `request.state.user_id`
+
+**User Isolation:**
+- All queries filter by `user_id`
+- Cross-user access returns empty/not-found
+- `get_conversation()` verifies `user_id` ownership
+- `get_messages()` verifies conversation belongs to user
+- Preferences are scoped by `user_id`
+
+**No New Authentication:** Uses existing `X-AI-Service-Key` middleware (same as `/api/ai/chat`)
+
+### Memory API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `GET /api/ai/conversations` | GET | List user's conversations |
+| `GET /api/ai/conversations/{id}` | GET | Get a specific conversation |
+| `GET /api/ai/preferences` | GET | Get all user preferences |
+| `POST /api/ai/preferences` | POST | Set/update a preference |
+| `DELETE /api/ai/preferences/{key}` | DELETE | Delete a specific preference |
+| `DELETE /api/ai/preferences` | DELETE | Clear all preferences |
+| `GET /api/ai/preferences/valid-keys` | GET | List valid preference keys |
+
+### Chat Integration
+
+The existing `/api/ai/chat` flow is enhanced:
+
+```
+User message + optional conversationId
+  ↓
+Get/create conversation for user
+  ↓
+Retrieve bounded conversation context (max 20 msgs, 8k chars)
+  ↓
+RAG retrieval (if aviation knowledge question)
+  ↓
+Build messages: [system_prompt, ...history, user_message]
+  ↓
+LLM + tool calling loop
+  ↓
+Persist user message + assistant response
+  ↓
+Return response + conversationId
+```
+
+**Backward Compatibility:**
+- `conversationId` is optional in request
+- New conversation created automatically when absent
+- Chat works without database (graceful fallback)
+- Existing RAG and tool calling behavior unchanged
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `app/memory/__init__.py` | Memory package init |
+| `app/memory/store.py` | asyncpg CRUD for conversations, messages, preferences |
+| `app/memory/service.py` | Service layer with merge logic and validation |
+| `app/api/memory.py` | Memory API endpoints |
+| `app/api/chat_service.py` | Updated with conversation memory integration |
+| `app/api/models.py` | Updated ChatRequest/ChatResponse with conversationId |
+| `app/api/recommendation.py` | Updated with preference memory integration |
+| `app/agents/nodes.py` | Updated parse_preferences to merge with stored prefs |
+| `tests/test_memory.py` | 48 AI-6 tests |
+| `V7__create_ai_memory_tables.sql` | Database migration |
+
+### What AI-6 Intentionally Does NOT Implement
+
+- Semantic conversation retrieval using embeddings
+- Conversation summarization
+- Long-term memory decay
+- Preference learning from behavior
+- Cross-session conversation search
+- Guardrails / PII scrubbing (→ AI-8)
+- Observability / tracing (→ AI-10)

@@ -23,5 +23,6 @@ def _get_chat_service() -> ChatService:
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, http_request: Request):
     request_id = getattr(http_request.state, "request_id", "unknown")
+    user_id = getattr(http_request.state, "user_id", None)
     service = _get_chat_service()
-    return await service.chat(request, request_id)
+    return await service.chat(request, request_id, user_id=user_id)

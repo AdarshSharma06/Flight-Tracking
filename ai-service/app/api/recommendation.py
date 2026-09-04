@@ -1,4 +1,4 @@
-"""Recommendation endpoint — AI-5 flight recommendation API."""
+"""Recommendation endpoint — AI-5 flight recommendation API with AI-6 memory."""
 
 import logging
 from typing import Optional
@@ -7,8 +7,9 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from app.agents.recommendation_agent import compile_recommendation_graph
-from app.agents.state import RecommendationState
+from app.agents.state import RecommendationState, UserPreferences
 from app.llm import create_llm_client
+from app.memory.service import memory_service
 
 logger = logging.getLogger(__name__)
 
@@ -92,11 +93,32 @@ async def recommend(request: RecommendationRequest, http_request: Request):
 
     Uses LangGraph to orchestrate a multi-step workflow:
     preference parsing → flight search → enrichment → weather → scoring → ranking → recommendation
+
+    Stored user preferences are loaded and used as defaults.
+    Explicit preferences in the query override stored ones.
     """
     request_id = getattr(http_request.state, "request_id", "unknown")
+    user_id = getattr(http_request.state, "user_id", None)
     llm_client = _get_llm_client()
 
-    initial_state = RecommendationState(user_request=request.query)
+    # Load stored preferences and inject into initial state
+    stored_prefs = {}
+    if user_id:
+        try:
+            stored_prefs = await memory_service.get_preferences(user_id)
+        except Exception as e:
+            logger.debug("Could not load stored preferences: %s", e)
+
+    # Build initial preferences from stored data
+    initial_preferences = None
+    if stored_prefs:
+        merged = memory_service.merge_preferences(stored_prefs)
+        initial_preferences = UserPreferences(**merged)
+
+    initial_state = RecommendationState(
+        user_request=request.query,
+        preferences=initial_preferences,
+    )
 
     try:
         graph = compile_recommendation_graph(llm_client)

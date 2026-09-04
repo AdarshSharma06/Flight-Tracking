@@ -25,6 +25,7 @@ export function AiPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -44,7 +45,8 @@ export function AiPage() {
     setLoading(true);
 
     try {
-      const res = await aiService.chat(message);
+      const res = await aiService.chat(message, conversationId);
+      setConversationId(res.conversationId);
       setMessages((prev) => [...prev, { role: "assistant", content: res.answer }]);
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : "Failed to get response.";
