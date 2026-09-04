@@ -12,6 +12,7 @@ from app.api.atc_models import (
 )
 from app.api.atc_prompt import ATC_EXPLANATION_PROMPT
 from app.llm.base import LLMClient, LLMMessage
+from app.guardrails import guardrail_service
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,30 @@ async def explain_anomaly(
         raw = response.content or ""
         parsed = _extract_json(raw)
 
+        # ── OUTPUT GUARDRAILS (ATC-specific, with grounding) ─────────
+        explanation_text = parsed.get("explanation", raw)
+        grounding_context = _build_atc_grounding_context(request)
+        output_result = guardrail_service.validate_output(
+            explanation_text,
+            has_tool_data=True,
+            is_atc_explanation=True,
+            grounding_context=grounding_context,
+        )
+        if output_result.violations:
+            # If grounding violation, append safe limitation and sanitize
+            has_grounding_violation = any(
+                v.violation_type.value in ("unsupported_claim", "fabricated_data")
+                for v in output_result.violations
+            )
+            if has_grounding_violation:
+                parsed_limitations = parsed.get("limitations", [])
+                parsed_limitations.append(
+                    "Grounding check flagged unsupported claims — output was sanitized to remove unverified values."
+                )
+                parsed["limitations"] = parsed_limitations
+        if output_result.sanitized_text:
+            parsed["explanation"] = output_result.sanitized_text
+
         return AtcExplanationResponse(
             explanation=parsed.get("explanation", raw),
             anomalyId=request.anomalyId,
@@ -154,6 +179,42 @@ async def explain_anomaly(
             context=[],
             limitations=["AI explanation is temporarily unavailable."] + (request.limitations or []),
         )
+
+
+def _build_atc_grounding_context(request: AtcExplanationRequest) -> dict:
+    """Build grounding context from structured ATC telemetry/weather.
+
+    Fields that are None are marked unavailable so the guardrail can
+    block hallucinated claims about them. Numeric fields with actual
+    values enable mismatch detection (e.g., altitude 10000 vs claim 35000).
+    """
+    ctx: dict = {}
+    if request.telemetry:
+        t = request.telemetry
+        ctx["live"] = t.latitude if t.latitude is not None and t.longitude is not None else None
+        ctx["altitude"] = t.altitude
+        ctx["speed"] = t.speed
+        ctx["heading"] = t.heading if t.heading is not None else t.direction
+        ctx["temperature"] = None  # telemetry has no temperature — weather does
+    else:
+        ctx["live"] = None
+        ctx["altitude"] = None
+        ctx["speed"] = None
+        ctx["heading"] = None
+
+    if request.weather:
+        w = request.weather
+        ctx["windSpeed"] = w.windSpeed
+        ctx["temperature"] = w.temperature if w.temperature is not None else ctx.get("temperature")
+    else:
+        ctx["windSpeed"] = None
+        if "temperature" not in ctx:
+            ctx["temperature"] = None
+
+    # Price/prediction never come via ATC
+    ctx["price"] = None
+    ctx["delay_probability"] = None
+    return ctx
 
 
 def _extract_json(text: str) -> dict:

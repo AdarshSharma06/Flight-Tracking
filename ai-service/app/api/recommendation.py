@@ -10,6 +10,7 @@ from app.agents.recommendation_agent import compile_recommendation_graph
 from app.agents.state import RecommendationState, UserPreferences
 from app.llm import create_llm_client
 from app.memory.service import memory_service
+from app.guardrails import guardrail_service
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,26 @@ class RecommendationResponse(BaseModel):
     requestId: str
 
 
+def _build_recommendation_grounding_context(recommendation, final_state: dict) -> dict:
+    """Build grounding context for recommendation: price/prediction availability."""
+    ctx: dict = {}
+    # Price is never available from live flight data (AI-5 price_data_available)
+    price_available = final_state.get("price_data_available", False) if isinstance(final_state, dict) else False
+    ctx["price"] = True if price_available else None
+    # Prediction never available until AI-11
+    has_available_prediction = False
+    if isinstance(final_state, dict):
+        pred_data = final_state.get("prediction_data", {})
+        if isinstance(pred_data, dict):
+            has_available_prediction = any(
+                getattr(v, "available", False) if hasattr(v, "available") else v.get("available", False)
+                for v in pred_data.values()
+            )
+    ctx["delay_probability"] = True if has_available_prediction else None
+    # Keep only unavailable entries for blocking; available True is kept but ignored
+    return {k: v for k, v in ctx.items() if v is None or isinstance(v, (int, float))}
+
+
 def _scored_flight_to_info(sf) -> ScoredFlightInfo:
     """Convert a ScoredFlight dataclass to a ScoredFlightInfo Pydantic model."""
     c = sf.candidate
@@ -99,6 +120,18 @@ async def recommend(request: RecommendationRequest, http_request: Request):
     """
     request_id = getattr(http_request.state, "request_id", "unknown")
     user_id = getattr(http_request.state, "user_id", None)
+
+    # ── INPUT GUARDRAILS ────────────────────────────────────────────
+    input_result = guardrail_service.validate_input(request.query)
+    if input_result.blocked:
+        refusal = guardrail_service.get_safe_refusal(input_result)
+        logger.warning("Recommendation input blocked by guardrails")
+        return RecommendationResponse(
+            explanation=refusal,
+            limitations=["Request blocked by input safety check"],
+            requestId=request_id,
+        )
+
     llm_client = _get_llm_client()
 
     # Load stored preferences and inject into initial state
@@ -144,11 +177,25 @@ async def recommend(request: RecommendationRequest, http_request: Request):
             _scored_flight_to_info(sf) for sf in recommendation.alternatives
         ]
 
+        # ── OUTPUT GUARDRAILS (with grounding: price/prediction) ──────
+        explanation_text = recommendation.explanation
+        grounding_context = _build_recommendation_grounding_context(
+            recommendation, final_state if isinstance(final_state, dict) else {}
+        )
+        output_result = guardrail_service.validate_output(
+            explanation_text, grounding_context=grounding_context
+        )
+        if output_result.sanitized_text:
+            explanation_text = output_result.sanitized_text
+        limitations = list(recommendation.limitations)
+        if any(v.violation_type.value in ("unsupported_claim", "fabricated_data") for v in output_result.violations):
+            limitations.append("Grounding check flagged unsupported price/prediction claims — output was sanitized.")
+
         return RecommendationResponse(
             recommended_flight=recommended,
             alternatives=alternatives,
-            explanation=recommendation.explanation,
-            limitations=recommendation.limitations,
+            explanation=explanation_text,
+            limitations=limitations,
             total_flights_evaluated=recommendation.total_flights_evaluated,
             requestId=request_id,
         )
