@@ -71,7 +71,8 @@ class AiControllerTest {
         ChatResponse mockResponse = new ChatResponse(
                 "An airport is a facility for aircraft operations.",
                 "gpt-4o-mini",
-                "req-test-123"
+                "req-test-123",
+                null
         );
         when(aiServiceClient.chat(any(ChatRequest.class), anyString()))
                 .thenReturn(mockResponse);
@@ -88,9 +89,10 @@ class AiControllerTest {
 
     @Test
     void chatResponseShapeMatchesContract() {
-        ChatResponse resp = new ChatResponse("answer", "model", "req-id");
+        ChatResponse resp = new ChatResponse("answer", "model", "req-id", null);
         assert resp.answer().equals("answer");
         assert resp.model().equals("model");
         assert resp.requestId().equals("req-id");
+        assert resp.conversationId() == null;
     }
 }
