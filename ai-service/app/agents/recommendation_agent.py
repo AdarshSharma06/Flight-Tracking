@@ -77,6 +77,34 @@ def _route_after_rank(state: RecommendationState) -> str:
     return "generate_recommendation"
 
 
+def _wrap_node(name: str, order: int, fn):
+    """Wrap a LangGraph node to emit agent_step observability (no behavior change)."""
+    import functools
+    import inspect
+    @functools.wraps(fn)
+    async def _wrapped(state):
+        from app.observability.context import get_request_id
+        from app.observability import tracer
+        rid = get_request_id() or "unknown"
+        start = tracer.start_timer()
+        try:
+            if inspect.iscoroutinefunction(fn):
+                result = await fn(state)
+            else:
+                # fn may be async wrapper that takes (state, llm) etc. — handle generically
+                result = fn(state)
+                if inspect.isawaitable(result):
+                    result = await result
+            duration_ms = tracer.elapsed_ms(start)
+            tracer.record_agent_step(rid, name, order, duration_ms, True)
+            return result
+        except Exception as e:
+            duration_ms = tracer.elapsed_ms(start)
+            tracer.record_agent_step(rid, name, order, duration_ms, False, status="error")
+            raise
+    return _wrapped
+
+
 def build_recommendation_graph(llm_client: Optional[LLMClient] = None) -> StateGraph:
     """Build the LangGraph recommendation workflow graph.
 
@@ -121,14 +149,14 @@ def build_recommendation_graph(llm_client: Optional[LLMClient] = None) -> StateG
 
     graph = StateGraph(RecommendationState)
 
-    graph.add_node("parse_preferences", _parse_preferences)
-    graph.add_node("search_flights", search_flights)
-    graph.add_node("enrich_flights", enrich_flights)
-    graph.add_node("get_weather", get_weather)
-    graph.add_node("get_predictions", get_predictions)
-    graph.add_node("score_flights", score_flights)
-    graph.add_node("rank_flights", rank_flights_node)
-    graph.add_node("generate_recommendation", _generate_recommendation)
+    graph.add_node("parse_preferences", _wrap_node("parse_preferences", 1, _parse_preferences))
+    graph.add_node("search_flights", _wrap_node("search_flights", 2, search_flights))
+    graph.add_node("enrich_flights", _wrap_node("enrich_flights", 3, enrich_flights))
+    graph.add_node("get_weather", _wrap_node("get_weather", 4, get_weather))
+    graph.add_node("get_predictions", _wrap_node("get_predictions", 5, get_predictions))
+    graph.add_node("score_flights", _wrap_node("score_flights", 6, score_flights))
+    graph.add_node("rank_flights", _wrap_node("rank_flights", 7, rank_flights_node))
+    graph.add_node("generate_recommendation", _wrap_node("generate_recommendation", 8, _generate_recommendation))
 
     graph.set_entry_point("parse_preferences")
 

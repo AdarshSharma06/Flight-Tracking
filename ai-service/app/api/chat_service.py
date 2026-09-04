@@ -22,7 +22,14 @@ class ChatService:
     async def chat(
         self, request: ChatRequest, request_id: str, user_id: Optional[str] = None
     ) -> ChatResponse:
+        from app.observability.tracer import ensure_request_context
+        from app.observability import tracer
+        # Ensure coherent request context (idempotent — preserves middleware trace)
+        request_id = ensure_request_context(request_id)
+        chat_start = tracer.start_timer()
+
         if not self.llm_client or not self.llm_client.is_configured():
+            tracer.record_router_decision(request_id, "chat_no_llm", reason="llm_not_configured")
             return ChatResponse(
                 answer="The AI assistant is not configured. Please set the LLM_API_KEY environment variable.",
                 model="none",
@@ -34,6 +41,8 @@ class ChatService:
         if input_result.blocked:
             refusal = guardrail_service.get_safe_refusal(input_result)
             logger.warning("Input guardrails blocked message: %s", input_result.violations)
+            # Chat metadata event
+            tracer.record_guardrail_decision(request_id, stage="chat_input", decision="BLOCK", violation_category=input_result.violations[0].violation_type.value if input_result.violations else None)
             return ChatResponse(
                 answer=refusal,
                 model="guardrail",
@@ -116,6 +125,24 @@ class ChatService:
             except Exception as e:
                 logger.debug("Could not persist assistant message: %s", e)
 
+            # ── Chat metadata event (no full history) ──────────────
+            try:
+                from app.observability.events import ObservabilityEvent
+                tracer.emit(ObservabilityEvent(
+                    request_id=request_id,
+                    event_type="router_decision",
+                    operation="chat",
+                    component="chat",
+                    metadata={
+                        "conversation_id": conversation_id or "none",
+                        "rag_used": bool(rag_context),
+                        "has_tools": bool(tool_defs),
+                        "model": response.model,
+                    }
+                ))
+            except Exception:
+                pass
+
             return ChatResponse(
                 answer=final_answer,
                 model=response.model,
@@ -123,6 +150,8 @@ class ChatService:
                 conversationId=conversation_id,
             )
         except Exception as e:
+            from app.observability.events import ObservabilityEvent
+            tracer.record_request_failed(request_id, "chat", tracer.elapsed_ms(chat_start), error_category="llm_error")
             logger.exception("LLM call failed")
             return ChatResponse(
                 answer="Sorry, the AI assistant encountered an error. Please try again later.",

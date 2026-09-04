@@ -41,12 +41,16 @@ public class AiServiceClient {
         }
     }
 
-    public ChatResponse chat(ChatRequest request, String userId) {
+    public ChatResponse chat(ChatRequest request, String userId, String requestId) {
         try {
             log.debug("Sending chat request to AI service");
-            ChatResponse response = restClient.post()
+            var builder = restClient.post()
                     .uri("/api/ai/chat")
-                    .header("X-User-Id", userId != null ? userId : "anonymous")
+                    .header("X-User-Id", userId != null ? userId : "anonymous");
+            if (requestId != null && !requestId.isBlank()) {
+                builder = builder.header("X-Request-ID", requestId);
+            }
+            ChatResponse response = builder
                     .body(request)
                     .retrieve()
                     .body(ChatResponse.class);
@@ -61,12 +65,21 @@ public class AiServiceClient {
         }
     }
 
-    public AtcExplanationResponse explainAnomaly(AtcExplanationRequest request, String userId) {
+    // Backwards-compatible overload
+    public ChatResponse chat(ChatRequest request, String userId) {
+        return chat(request, userId, null);
+    }
+
+    public AtcExplanationResponse explainAnomaly(AtcExplanationRequest request, String userId, String requestId) {
         try {
             log.debug("Sending ATC explanation request to AI service for anomaly {}", request.anomalyId());
-            AtcExplanationResponse response = restClient.post()
+            var builder = restClient.post()
                     .uri("/api/ai/atc/explain")
-                    .header("X-User-Id", userId != null ? userId : "anonymous")
+                    .header("X-User-Id", userId != null ? userId : "anonymous");
+            if (requestId != null && !requestId.isBlank()) {
+                builder = builder.header("X-Request-ID", requestId);
+            }
+            AtcExplanationResponse response = builder
                     .body(request)
                     .retrieve()
                     .body(AtcExplanationResponse.class);
@@ -79,5 +92,10 @@ public class AiServiceClient {
             log.error("AI service ATC explanation request failed: {}", e.getMessage());
             throw new ExternalApiException("AI service error: " + e.getMessage(), e);
         }
+    }
+
+    // Backwards-compatible overload
+    public AtcExplanationResponse explainAnomaly(AtcExplanationRequest request, String userId) {
+        return explainAnomaly(request, userId, null);
     }
 }

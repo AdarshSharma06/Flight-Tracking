@@ -41,6 +41,11 @@ class Settings(BaseSettings):
 
     # Observability
     log_level: str = "INFO"
+    # Pricing per 1M tokens (USD) — None means unavailable / not configured
+    llm_input_cost_per_1m: Optional[float] = None
+    llm_output_cost_per_1m: Optional[float] = None
+    # Prompt versioning
+    prompt_version: str = "ai-10-v1"
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost:5173"

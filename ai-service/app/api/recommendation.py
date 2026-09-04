@@ -118,7 +118,12 @@ async def recommend(request: RecommendationRequest, http_request: Request):
     Stored user preferences are loaded and used as defaults.
     Explicit preferences in the query override stored ones.
     """
+    from app.observability.tracer import ensure_request_context
+    from app.observability import tracer
     request_id = getattr(http_request.state, "request_id", "unknown")
+    request_id = ensure_request_context(request_id)
+    rec_start = tracer.start_timer()
+
     user_id = getattr(http_request.state, "user_id", None)
 
     # ── INPUT GUARDRAILS ────────────────────────────────────────────
@@ -126,6 +131,7 @@ async def recommend(request: RecommendationRequest, http_request: Request):
     if input_result.blocked:
         refusal = guardrail_service.get_safe_refusal(input_result)
         logger.warning("Recommendation input blocked by guardrails")
+        # Lifecycle is handled by middleware — keep only guardrail decision (already emitted by service)
         return RecommendationResponse(
             explanation=refusal,
             limitations=["Request blocked by input safety check"],
@@ -191,6 +197,8 @@ async def recommend(request: RecommendationRequest, http_request: Request):
         if any(v.violation_type.value in ("unsupported_claim", "fabricated_data") for v in output_result.violations):
             limitations.append("Grounding check flagged unsupported price/prediction claims — output was sanitized.")
 
+        # Success — lifecycle handled by middleware; component events already emitted via agent_step/llm/guardrail
+
         return RecommendationResponse(
             recommended_flight=recommended,
             alternatives=alternatives,
@@ -201,6 +209,17 @@ async def recommend(request: RecommendationRequest, http_request: Request):
         )
 
     except Exception as e:
+        # Middleware will record request_failed/request_completed; emit component-specific failure
+        from app.observability.events import ObservabilityEvent
+        tracer.emit(ObservabilityEvent(
+            request_id=request_id,
+            event_type="request_failed",
+            operation="recommendation",
+            component="agent",
+            duration_ms=tracer.elapsed_ms(rec_start),
+            status="failure",
+            error_category="recommendation_error",
+        ))
         logger.exception("Recommendation failed")
         return RecommendationResponse(
             explanation="Sorry, the recommendation service encountered an error. Please try again.",

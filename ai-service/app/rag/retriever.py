@@ -25,13 +25,29 @@ async def retrieve(
     Returns:
         List of RetrievalResult, sorted by relevance descending.
     """
+    from app.observability.context import get_request_id
+    from app.observability import tracer
+    request_id = get_request_id() or "unknown"
+    start = tracer.start_timer()
+
     if not query or not query.strip():
+        tracer.record_rag_retrieval(request_id, duration_ms=tracer.elapsed_ms(start), used=False, chunk_count=0, query_len=0)
+        tracer.record_router_decision(request_id, "rag_skip", reason="empty_query")
+        return []
+
+    # Router decision: should_use_rag
+    used_rag = should_use_rag(query)
+    tracer.record_router_decision(request_id, "rag_use" if used_rag else "rag_skip", reason="should_use_rag=%s" % used_rag)
+    if not used_rag:
+        # No retrieval needed, but still record event for observability
+        tracer.record_rag_retrieval(request_id, duration_ms=tracer.elapsed_ms(start), used=False, chunk_count=0, query_len=len(query))
         return []
 
     try:
         query_embedding = embed_query(query)
     except Exception as e:
         logger.error("Query embedding failed: %s", e)
+        tracer.record_rag_retrieval(request_id, duration_ms=tracer.elapsed_ms(start), used=True, chunk_count=0, query_len=len(query))
         return []
 
     try:
@@ -42,8 +58,12 @@ async def retrieve(
         )
     except Exception as e:
         logger.error("Vector search failed: %s", e)
+        tracer.record_rag_retrieval(request_id, duration_ms=tracer.elapsed_ms(start), used=True, chunk_count=0, query_len=len(query))
         return []
 
+    duration_ms = tracer.elapsed_ms(start)
+    scores = [round(r.score, 3) for r in results]
+    tracer.record_rag_retrieval(request_id, duration_ms=duration_ms, used=True, chunk_count=len(results), scores=scores, query_len=len(query))
     logger.debug(
         "Retrieved %d chunks for query '%s...' (threshold=%.2f)",
         len(results),

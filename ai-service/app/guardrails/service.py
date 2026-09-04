@@ -24,7 +24,16 @@ class GuardrailService:
 
     def validate_input(self, message: str) -> GuardrailResult:
         """Validate user input before LLM processing."""
-        return self.input_guardrails.validate(message)
+        from app.observability.context import get_request_id
+        from app.observability import tracer
+        request_id = get_request_id() or "unknown"
+        start = tracer.start_timer()
+        result = self.input_guardrails.validate(message)
+        duration_ms = tracer.elapsed_ms(start)
+        decision = "BLOCK" if result.blocked else "PASS"
+        violation = result.violations[0].violation_type.value if result.violations else None
+        tracer.record_guardrail_decision(request_id, stage="input", decision=decision, violation_category=violation, duration_ms=duration_ms)
+        return result
 
     def validate_output(
         self,
@@ -35,23 +44,44 @@ class GuardrailService:
         grounding_context: Optional[dict] = None,
     ) -> GuardrailResult:
         """Validate LLM output before returning to user."""
-        return self.output_guardrails.validate(
+        from app.observability.context import get_request_id
+        from app.observability import tracer
+        request_id = get_request_id() or "unknown"
+        start = tracer.start_timer()
+        result = self.output_guardrails.validate(
             text,
             has_tool_data=has_tool_data,
             has_rag_data=has_rag_data,
             is_atc_explanation=is_atc_explanation,
             grounding_context=grounding_context,
         )
+        duration_ms = tracer.elapsed_ms(start)
+        # Determine decision
+        if result.blocked:
+            # Check if sanitized vs blocked
+            has_sanitize = any(v.violation_type.value in ("secret_leakage", "internal_detail_leakage", "unsupported_claim", "fabricated_data") for v in result.violations)
+            decision = "SANITIZE" if has_sanitize and result.sanitized_text and result.sanitized_text != text else "BLOCK"
+        else:
+            decision = "PASS"
+        stage = "output_atc" if is_atc_explanation else "output"
+        violation = result.violations[0].violation_type.value if result.violations else None
+        tracer.record_guardrail_decision(request_id, stage=stage, decision=decision, violation_category=violation, duration_ms=duration_ms)
+        return result
 
     def validate_tool_call(self, tool_name: str, tool_names: list[str]) -> Optional[GuardrailViolation]:
         """Validate that a tool call targets a registered tool."""
+        from app.observability.context import get_request_id
+        from app.observability import tracer
+        request_id = get_request_id() or "unknown"
         if tool_name not in tool_names:
+            tracer.record_guardrail_decision(request_id, stage="tool", decision="BLOCK", violation_category=ViolationType.UNKNOWN_TOOL.value)
             return GuardrailViolation(
                 violation_type=ViolationType.UNKNOWN_TOOL,
                 severity=ViolationSeverity.BLOCK,
                 message=f"Tool '{tool_name}' is not registered.",
                 detail=f"Available tools: {', '.join(tool_names)}",
             )
+        tracer.record_guardrail_decision(request_id, stage="tool", decision="PASS", violation_category=None)
         return None
 
     def validate_tool_result(self, tool_result: str) -> str:

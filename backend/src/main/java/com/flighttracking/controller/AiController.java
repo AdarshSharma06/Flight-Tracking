@@ -24,10 +24,20 @@ public class AiController {
     @PostMapping("/chat")
     public ResponseEntity<ChatResponse> chat(
             @Valid @RequestBody ChatRequest request,
-            Authentication authentication) {
+            Authentication authentication,
+            @org.springframework.web.bind.annotation.RequestHeader(value = "X-Request-ID", required = false) String requestId,
+            jakarta.servlet.http.HttpServletRequest httpRequest) {
 
+        // Prefer header, fall back to filter's attribute, then generate
+        String rid = requestId;
+        if (rid == null || rid.isBlank()) {
+            Object attr = httpRequest.getAttribute("X-Request-ID");
+            rid = attr != null ? attr.toString() : null;
+        }
         String userId = authentication != null ? authentication.getName() : "anonymous";
-        ChatResponse response = aiServiceClient.chat(request, userId);
-        return ResponseEntity.ok(response);
+        ChatResponse response = aiServiceClient.chat(request, userId, rid);
+        return ResponseEntity.ok()
+                .header("X-Request-ID", rid != null ? rid : "")
+                .body(response);
     }
 }

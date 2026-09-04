@@ -10,6 +10,9 @@ from app.llm.base import LLMClient, LLMMessage, LLMResponse, ToolCall
 
 logger = logging.getLogger(__name__)
 
+# Prompt version for observability
+PROMPT_VERSION = "ai-10-v1"
+
 
 class OpenAICompatibleClient(LLMClient):
     """LLM client for OpenAI-compatible APIs (OpenAI, Azure, Ollama, OpenRouter, etc.)."""
@@ -41,6 +44,22 @@ class OpenAICompatibleClient(LLMClient):
         tools: Optional[list[dict[str, Any]]] = None,
     ) -> LLMResponse:
         model = model or self.default_model
+
+        # ── Observability: LLM start ──────────────────────────────
+        from app.observability.context import get_request_id
+        from app.observability import tracer
+        from app.observability.cost import estimate_cost
+        from app.config import get_settings
+        request_id = get_request_id() or "unknown"
+        settings = None
+        try:
+            settings = get_settings()
+        except Exception:
+            pass
+        prompt_version = getattr(settings, "prompt_version", PROMPT_VERSION) if settings else PROMPT_VERSION
+        # Never log full prompts — only metadata
+        tracer.record_llm_started(request_id, model=model, provider=self.base_url, prompt_version=prompt_version)
+        start = tracer.start_timer()
 
         payload: dict[str, Any] = {
             "model": model,
@@ -82,7 +101,7 @@ class OpenAICompatibleClient(LLMClient):
                         )
                     )
 
-            return LLMResponse(
+            llm_response = LLMResponse(
                 content=content,
                 model=data.get("model", model),
                 tool_calls=tool_calls,
@@ -93,13 +112,35 @@ class OpenAICompatibleClient(LLMClient):
                     "total_tokens": usage.get("total_tokens", 0),
                 },
             )
+            duration_ms = tracer.elapsed_ms(start)
+            pt = llm_response.usage.get("prompt_tokens", 0)
+            ct = llm_response.usage.get("completion_tokens", 0)
+            tt = llm_response.usage.get("total_tokens", 0)
+            # Honest unavailable: if all zero, represent as unavailable (None)
+            has_usage = any([pt, ct, tt])
+            est_cost = estimate_cost(pt, ct, settings) if has_usage else None
+            tracer.record_llm_completed(
+                request_id, model=llm_response.model, duration_ms=duration_ms, success=True,
+                prompt_tokens=pt if has_usage else None,
+                completion_tokens=ct if has_usage else None,
+                total_tokens=tt if has_usage else None,
+                estimated_cost=est_cost,
+                prompt_version=prompt_version,
+            )
+            return llm_response
         except httpx.TimeoutException:
+            duration_ms = tracer.elapsed_ms(start)
+            tracer.record_llm_completed(request_id, model=model, duration_ms=duration_ms, success=False, prompt_version=prompt_version)
             logger.error("LLM request timed out")
             raise
         except httpx.HTTPStatusError as e:
+            duration_ms = tracer.elapsed_ms(start)
+            tracer.record_llm_completed(request_id, model=model, duration_ms=duration_ms, success=False, prompt_version=prompt_version)
             logger.error("LLM API error: %s - %s", e.response.status_code, e.response.text[:200])
             raise
         except Exception as e:
+            duration_ms = tracer.elapsed_ms(start)
+            tracer.record_llm_completed(request_id, model=model, duration_ms=duration_ms, success=False, prompt_version=prompt_version)
             logger.error("Unexpected LLM error: %s", e)
             raise
 

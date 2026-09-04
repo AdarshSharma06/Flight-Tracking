@@ -111,7 +111,20 @@ async def explain_anomaly(
     The anomaly has already been detected by the application.
     This function provides a human-readable explanation grounded in the actual data.
     """
+    from app.observability.context import get_request_id
+    from app.observability.tracer import ensure_request_context
+    from app.observability import tracer
+    # Ensure coherent context — preserves middleware trace, or creates one for direct calls
+    existing = get_request_id()
+    if not existing or existing == "unknown":
+        request_id = ensure_request_context(None)
+    else:
+        request_id = existing
+    atc_start = tracer.start_timer()
+    tracer.record_router_decision(request_id, "atc_explain_started", reason=f"anomaly={request.anomalyId}")
+
     if not llm_client or not llm_client.is_configured():
+        tracer.record_router_decision(request_id, "atc_explain_no_llm", reason="llm_not_configured")
         return AtcExplanationResponse(
             explanation="AI explanation is currently unavailable. The anomaly data is still available in the dashboard.",
             anomalyId=request.anomalyId,
@@ -160,6 +173,18 @@ async def explain_anomaly(
         if output_result.sanitized_text:
             parsed["explanation"] = output_result.sanitized_text
 
+        duration_ms = tracer.elapsed_ms(atc_start)
+        from app.observability.events import ObservabilityEvent
+        tracer.emit(ObservabilityEvent(
+            request_id=request_id,
+            event_type="agent_step",
+            operation="atc_explain",
+            component="atc",
+            duration_ms=duration_ms,
+            status="success",
+            metadata={"anomaly_id": request.anomalyId, "flight": request.flightNumber or ""},
+        ))
+
         return AtcExplanationResponse(
             explanation=parsed.get("explanation", raw),
             anomalyId=request.anomalyId,
@@ -170,6 +195,8 @@ async def explain_anomaly(
         )
 
     except Exception as e:
+        duration_ms = tracer.elapsed_ms(atc_start)
+        tracer.record_request_failed(request_id, "atc_explain", duration_ms, error_category="llm_error")
         logger.exception("LLM call failed for ATC explanation of anomaly %s", request.anomalyId)
         return AtcExplanationResponse(
             explanation="AI explanation is currently unavailable. The anomaly data is still available in the dashboard.",

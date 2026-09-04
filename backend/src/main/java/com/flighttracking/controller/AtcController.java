@@ -132,8 +132,15 @@ public class AtcController {
     @PostMapping("/anomalies/{id}/explain")
     public ResponseEntity<AtcExplanationResponse> explainAnomaly(
             @PathVariable Long id,
-            Authentication authentication) {
+            Authentication authentication,
+            @RequestHeader(value = "X-Request-ID", required = false) String requestId,
+            jakarta.servlet.http.HttpServletRequest httpRequest) {
 
+        String rid = requestId;
+        if (rid == null || rid.isBlank()) {
+            Object attr = httpRequest.getAttribute("X-Request-ID");
+            rid = attr != null ? attr.toString() : null;
+        }
         String userId = authentication != null ? authentication.getName() : "anonymous";
 
         AnomalyResponse anomaly = anomalyRecordService.getById(id);
@@ -186,7 +193,7 @@ public class AtcController {
 
         AtcExplanationResponse response;
         try {
-            response = aiServiceClient.explainAnomaly(aiRequest, userId);
+            response = aiServiceClient.explainAnomaly(aiRequest, userId, rid);
         } catch (ExternalApiException e) {
             log.debug("AI explanation unavailable for anomaly {}: {}", id, e.getMessage());
             limitations.add("AI explanation is temporarily unavailable.");
@@ -199,6 +206,8 @@ public class AtcController {
                     limitations
             );
         }
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok()
+                .header("X-Request-ID", rid != null ? rid : "")
+                .body(response);
     }
 }

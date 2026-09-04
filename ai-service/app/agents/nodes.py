@@ -33,6 +33,27 @@ from app.tools.registry import registry
 
 logger = logging.getLogger(__name__)
 
+# ── Observability helper (no secrets, no behavior change) ───────
+_step_order = {
+    "parse_preferences": 1,
+    "search_flights": 2,
+    "enrich_flights": 3,
+    "get_weather": 4,
+    "get_predictions": 5,
+    "score_flights": 6,
+    "rank_flights": 7,
+    "generate_recommendation": 8,
+}
+
+def _record_agent_step(step_name: str, duration_ms: float, success: bool, status: str = ""):
+    try:
+        from app.observability.context import get_request_id
+        from app.observability import tracer
+        rid = get_request_id() or "unknown"
+        tracer.record_agent_step(rid, step_name, _step_order.get(step_name, 0), duration_ms, success, status=status)
+    except Exception:
+        pass
+
 MAX_SEARCH_RESULTS = 20
 
 

@@ -74,6 +74,9 @@ class AiControllerTest {
                 "req-test-123",
                 null
         );
+        when(aiServiceClient.chat(any(ChatRequest.class), anyString(), any()))
+                .thenReturn(mockResponse);
+        // Backwards compat: also stub 2-arg overload
         when(aiServiceClient.chat(any(ChatRequest.class), anyString()))
                 .thenReturn(mockResponse);
 

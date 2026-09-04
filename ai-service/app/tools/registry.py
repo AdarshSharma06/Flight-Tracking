@@ -31,8 +31,16 @@ class ToolRegistry:
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         """Execute a tool by name with the given arguments."""
+        from app.observability.context import get_request_id
+        from app.observability import tracer
+        request_id = get_request_id() or "unknown"
+        start = tracer.start_timer()
+        tracer.record_tool_started(request_id, name)
+
         tool = self._tools.get(name)
         if not tool:
+            duration_ms = tracer.elapsed_ms(start)
+            tracer.record_tool_failed(request_id, name, duration_ms, error_category="unknown_tool")
             return ToolResult(
                 success=False,
                 error=f"Unknown tool: {name}. Available tools: {', '.join(self._tools.keys())}",
@@ -40,15 +48,23 @@ class ToolRegistry:
 
         validation_error = tool.validate_args(arguments)
         if validation_error:
+            duration_ms = tracer.elapsed_ms(start)
+            tracer.record_tool_failed(request_id, name, duration_ms, error_category="validation_error")
             return ToolResult(success=False, error=validation_error)
 
         try:
             logger.info("Executing tool: %s with args: %s", name, arguments)
             result = await tool.execute(**arguments)
+            duration_ms = tracer.elapsed_ms(start)
             logger.info("Tool %s completed: success=%s", name, result.success)
+            # Do not log huge payloads; record metadata only
+            result_size = len(str(result.data)) if result.data is not None else 0
+            tracer.record_tool_completed(request_id, name, duration_ms, success=result.success, result_size=result_size, status="success" if result.success else "failure")
             return result
         except Exception as e:
+            duration_ms = tracer.elapsed_ms(start)
             logger.exception("Tool %s execution failed", name)
+            tracer.record_tool_failed(request_id, name, duration_ms, error_category="execution_exception")
             return ToolResult(success=False, error=f"Tool execution failed: {e}")
 
     @property
