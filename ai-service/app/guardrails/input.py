@@ -2,6 +2,7 @@
 
 import logging
 import re
+from typing import Optional
 
 from app.guardrails.models import (
     GuardrailResult,
