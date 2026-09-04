@@ -316,4 +316,214 @@ No additional environment variables are required. The MCP server uses the same c
 
 ---
 
-*This document defines the target architecture. AI-0 through AI-3 are complete. AI-4 implements MCP as the standardized tool interface.*
+## J. AI-5: LangGraph Flight Recommendation Agent
+
+### Why LangGraph
+
+LangGraph provides an explicit **state graph** for multi-step agent workflows. Unlike a simple LLM → prompt → answer loop, LangGraph:
+
+1. **Enforces structure**: Each step is a named node with typed state
+2. **Enables branching**: Conditional edges route based on data availability
+3. **Provides observability**: Graph execution is traceable node-by-node
+4. **Supports state**: Typed state flows through the entire workflow
+5. **Integrates with LangChain ecosystem**: Compatible with existing tools and LLM abstractions
+
+### Recommendation Workflow
+
+```
+START
+  ↓
+parse_preferences    (LLM extracts structured preferences from natural language)
+  ↓
+search_flights       (ToolRegistry → Spring Boot → flight data provider)
+  ↓
+enrich_flights       (Optional: get_flight_status — NOT get_flight_tracking)
+  ↓
+get_weather          (ToolRegistry → Spring Boot → weather data)
+  ↓
+get_predictions      (Placeholder for AI-11 ML models)
+  ↓
+score_flights        (Deterministic multi-factor scoring)
+  ↓
+rank_flights         (Sort by score, descending)
+  ↓
+generate_recommendation  (LLM generates human-readable explanation)
+  ↓
+END
+```
+
+### Agent State
+
+The agent uses a typed `RecommendationState` dataclass:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `user_request` | `str` | Original natural language request |
+| `preferences` | `UserPreferences` | Parsed structured preferences |
+| `candidate_flights` | `list[FlightCandidate]` | Flights from search |
+| `weather_data` | `dict[str, WeatherInfo]` | Weather by airport IATA |
+| `prediction_data` | `dict[str, PredictionInfo]` | Delay predictions (placeholder) |
+| `scored_flights` | `list[ScoredFlight]` | Flights with computed scores |
+| `ranked_flights` | `list[ScoredFlight]` | Scored flights sorted by score |
+| `recommendation` | `RecommendationResult` | Final output |
+| `errors` | `list[str]` | Accumulated error messages |
+| `unavailable_data` | `list[str]` | Markers for missing data |
+| `price_data_available` | `bool` | Whether flight search returned price data |
+
+### Graph Nodes
+
+| Node | Purpose | Uses LLM? | Uses Tools? |
+|------|---------|-----------|-------------|
+| `parse_preferences` | Extract structured preferences from NL | Yes | No |
+| `search_flights` | Search flights by route | No | Yes (search_flights) |
+| `enrich_flights` | Get flight status details | No | Yes (get_flight_status) |
+| `get_weather` | Weather at origin/destination | No | Yes (get_weather) |
+| `get_predictions` | Delay prediction placeholder | No | No (returns unavailable) |
+| `score_flights` | Deterministic multi-factor scoring | No | No |
+| `rank_flights` | Sort scored flights | No | No |
+| `generate_recommendation` | Human-readable explanation | Yes | No |
+
+### Tool Interaction
+
+The recommendation agent reuses existing AI-3 tools through the same `ToolRegistry`:
+
+```
+Recommendation Node
+    ↓
+ToolRegistry.execute(tool_name, args)
+    ↓
+AI-3 Tool implementation (flight_tools, airport_tools, etc.)
+    ↓
+Spring Boot proxy (/api/ai/proxy/*)
+    ↓
+Existing services → AviationStack / Open-Meteo / DB
+```
+
+**Tools used by the recommendation agent:**
+- `search_flights` — search flights by route
+- `get_flight_status` — enrich candidates with status/aircraft/airline details
+- `get_weather` — weather conditions at origin/destination airports
+
+**Tools NOT used (intentionally):**
+- `get_flight_tracking` — live aircraft position is irrelevant for recommendation scoring
+- `get_airport_information` — airport details not needed for scoring
+- `get_airport_departures` / `get_airport_arrivals` — not needed for route-specific search
+
+### Deterministic Scoring
+
+Scoring is **purely data-driven** — the LLM does not decide which flight is "best".
+
+| Factor | Weight | Source |
+|--------|--------|--------|
+| `direct_preference` | 0.30 | User preference + flight data |
+| `departure_convenience` | 0.15 | Parsed travel time vs actual departure |
+| `arrival_convenience` | 0.15 | Arrival time during reasonable hours |
+| `weather_impact` | 0.10 | Weather conditions at airport |
+| `status_health` | 0.10 | Flight status (active, delayed, etc.) |
+| `delay_risk` | 0.10 | Delay prediction (when available) |
+| `airline_match` | 0.10 | Airline preference match |
+
+Missing data results in neutral scores (0.5), never fabricated values.
+
+### Budget and Price Data
+
+Flight search results do **not** include ticket prices. The scoring system has no price factor. When a user specifies a budget:
+
+- The `price_data_available` state flag is `False`
+- The recommendation explicitly notes "Budget of X could not be verified — flight data does not include ticket prices" in limitations
+- The LLM prompt explicitly instructs: "Do NOT state or imply that the recommended flight is within the user's budget"
+- Future phases (AI-11) may add price prediction or API integration to populate prices
+
+### Handling Unavailable Predictions
+
+AI-5 does **not** implement ML predictions. The `get_predictions` node returns `PredictionInfo(available=False)` for all flights. The scoring system handles this gracefully:
+
+- Delay risk score defaults to 0.5 (neutral) when prediction is unavailable
+- The recommendation explicitly notes "Delay prediction unavailable (ML model pending)" in limitations
+- When AI-11 implements prediction models, it plugs into the `get_predictions` node without redesigning the graph
+
+### Relationship with Future ML (AI-11)
+
+The `get_predictions` node is a clean integration point:
+
+```python
+# AI-5: returns unavailable
+async def get_predictions(state):
+    return {"prediction_data": {fn: PredictionInfo(available=False) for fn in ...}}
+
+# AI-11: will call actual ML model
+async def get_predictions(state):
+    prediction = await ml_model.predict(flight)
+    return {"prediction_data": {fn: PredictionInfo(available=True, delay_probability=p)}}
+```
+
+The scoring, ranking, and recommendation nodes require zero changes.
+
+### Relationship with AI-3 Tools / MCP
+
+- The recommendation agent uses the same `ToolRegistry` as ChatService (AI-3) and MCP (AI-4)
+- No duplicate tool implementations
+- MCP remains the standardized external tool interface
+- The recommendation agent is an orchestration layer, not a replacement
+
+### API Endpoint
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/ai/recommend` | POST | Flight recommendation |
+
+**Security**: The endpoint is protected by the same `X-AI-Service-Key` middleware as `/api/ai/chat`. When `ai_service_api_key` is configured in `config.py`, requests without a valid key receive `401 UNAUTHORIZED`. Both endpoints share identical security behavior — no bypass or exception is introduced.
+
+Request:
+```json
+{
+  "query": "Find me the best flight from Delhi to London tomorrow under ₹60,000, preferably direct."
+}
+```
+
+Response:
+```json
+{
+  "recommended_flight": {
+    "flight": { "flight_number": "AI302", "origin": "DEL", "..." : "..." },
+    "score": 0.85,
+    "score_breakdown": { "..." : "..." },
+    "weather_available": true,
+    "prediction_available": false
+  },
+  "alternatives": [],
+  "explanation": "Flight AI302 is recommended because...",
+  "limitations": ["Delay prediction unavailable (ML model pending)"],
+  "total_flights_evaluated": 5,
+  "requestId": "..."
+}
+```
+
+### What AI-5 Intentionally Does NOT Implement
+
+- ML delay prediction models (→ AI-11)
+- Price prediction / price increase forecasting (→ AI-11)
+- Demand prediction (→ AI-11)
+- Airport congestion prediction (→ AI-11)
+- Conversation memory / preference memory (→ AI-6)
+- Guardrails / PII scrubbing (→ AI-8)
+- Evaluation framework (→ AI-9)
+- Observability / tracing (→ AI-10)
+- Frontend redesign (→ Booking/SHR integration)
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `app/agents/__init__.py` | Agents package init |
+| `app/agents/state.py` | Typed state models (RecommendationState, etc.) |
+| `app/agents/nodes.py` | 8 LangGraph workflow nodes |
+| `app/agents/ranking.py` | Deterministic scoring and ranking |
+| `app/agents/recommendation_agent.py` | Graph construction and compilation |
+| `app/api/recommendation.py` | API endpoint and request/response models |
+| `tests/test_recommendation.py` | 73 AI-5 tests (incl. budget, enrichment, security) |
+| `requirements.txt` | Added `langgraph>=0.2.0,<1.0` dependency |
+
+---
+
+*This document defines the target architecture. AI-0 through AI-4 are complete. AI-5 implements the LangGraph-based flight recommendation agent.*
