@@ -1,0 +1,112 @@
+[
+  {
+    "id": "rag-001",
+    "category": "RAG",
+    "input": "What is a squawk code?",
+    "description": "Squawk code definition — should retrieve squawk_codes knowledge",
+    "expected_answer_keywords": ["squawk", "transponder", "atc", "code"],
+    "expected_topics": ["squawk"],
+    "expected_sources": ["squawk_codes.txt"],
+    "expected_should_use_rag": true,
+    "tags": ["squawk", "transponder", "atc"]
+  },
+  {
+    "id": "rag-002",
+    "category": "RAG",
+    "input": "What is an ILS?",
+    "description": "Instrument Landing System — should retrieve ils knowledge",
+    "expected_answer_keywords": ["ils", "instrument", "landing", "glide", "localizer"],
+    "expected_topics": ["ils"],
+    "expected_sources": ["ils.txt"],
+    "expected_should_use_rag": true,
+    "tags": ["ils", "landing"]
+  },
+  {
+    "id": "rag-003",
+    "category": "RAG",
+    "input": "What is VOR navigation?",
+    "description": "VOR navigation principle",
+    "expected_answer_keywords": ["vor", "navigation", "radial", "beacon"],
+    "expected_topics": ["vor"],
+    "expected_sources": ["vor_navigation.txt"],
+    "expected_should_use_rag": true,
+    "tags": ["vor", "navigation"]
+  },
+  {
+    "id": "rag-004",
+    "category": "RAG",
+    "input": "Explain the basic phases of flight in aviation",
+    "description": "Flight phases sequence",
+    "expected_answer_keywords": ["takeoff", "climb", "cruise", "descent", "landing"],
+    "expected_topics": ["flight phases"],
+    "expected_sources": ["flight_phases.txt"],
+    "expected_should_use_rag": true,
+    "tags": ["flight-phases"]
+  },
+  {
+    "id": "rag-005",
+    "category": "RAG",
+    "input": "Explain ATC basics and its role",
+    "description": "ATC basics knowledge",
+    "expected_answer_keywords": ["atc", "air traffic", "control", "tower"],
+    "expected_topics": ["atc"],
+    "expected_sources": ["atc_basics.txt"],
+    "expected_should_use_rag": true,
+    "tags": ["atc"]
+  },
+  {
+    "id": "rag-006",
+    "category": "RAG",
+    "input": "Tell me about aviation weather and METAR",
+    "description": "Aviation weather / METAR knowledge",
+    "expected_answer_keywords": ["weather", "metar", "aviation"],
+    "expected_topics": ["weather"],
+    "expected_sources": ["aviation_weather.txt"],
+    "expected_should_use_rag": true,
+    "tags": ["weather", "metar"]
+  },
+  {
+    "id": "rag-007",
+    "category": "RAG",
+    "input": "What are the parts of an aircraft?",
+    "description": "Aircraft basics knowledge",
+    "expected_answer_keywords": ["aircraft", "fuselage", "wing", "engine"],
+    "expected_topics": ["aircraft"],
+    "expected_sources": ["aircraft_basics.txt"],
+    "expected_should_use_rag": true,
+    "tags": ["aircraft"]
+  },
+  {
+    "id": "rag-008",
+    "category": "RAG",
+    "input": "What is an airport and what are its main components?",
+    "description": "Airport basics knowledge",
+    "expected_answer_keywords": ["airport", "runway", "terminal", "taxiway"],
+    "expected_topics": ["airport"],
+    "expected_sources": ["airport_basics.txt"],
+    "expected_should_use_rag": true,
+    "tags": ["airport"]
+  },
+  {
+    "id": "rag-009",
+    "category": "RAG",
+    "input": "Where is AI302?",
+    "description": "Live flight query must NOT use RAG",
+    "expected_answer_keywords": [],
+    "expected_topics": [],
+    "expected_sources": [],
+    "expected_should_use_rag": false,
+    "tags": ["negative", "live-data"]
+  },
+  {
+    "id": "rag-010",
+    "category": "RAG",
+    "input": "Hello, how are you?",
+    "description": "General greeting must NOT use RAG",
+    "expected_answer_keywords": [],
+    "expected_topics": [],
+    "expected_sources": [],
+    "expected_should_use_rag": false,
+    "tags": ["negative", "greeting"]
+  }
+]

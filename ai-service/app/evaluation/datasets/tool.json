@@ -1,0 +1,74 @@
+[
+  {
+    "id": "tool-001",
+    "category": "TOOL",
+    "input": "Is AI302 delayed?",
+    "description": "Flight status query",
+    "expected_tools": ["get_flight_status"],
+    "metadata": {"flight_number": "AI302"},
+    "tags": ["flight-status"]
+  },
+  {
+    "id": "tool-002",
+    "category": "TOOL",
+    "input": "Where is AI302?",
+    "description": "Live tracking query",
+    "expected_tools": ["get_flight_tracking"],
+    "metadata": {"flight_number": "AI302"},
+    "tags": ["tracking"]
+  },
+  {
+    "id": "tool-003",
+    "category": "TOOL",
+    "input": "What is the weather at DEL?",
+    "description": "Weather query",
+    "expected_tools": ["get_weather"],
+    "metadata": {"iata": "DEL"},
+    "tags": ["weather"]
+  },
+  {
+    "id": "tool-004",
+    "category": "TOOL",
+    "input": "What are today's departures from DEL?",
+    "description": "Airport departures",
+    "expected_tools": ["get_airport_departures"],
+    "metadata": {"iata": "DEL"},
+    "tags": ["airport"]
+  },
+  {
+    "id": "tool-005",
+    "category": "TOOL",
+    "input": "What are arrivals at BOM?",
+    "description": "Airport arrivals",
+    "expected_tools": ["get_airport_arrivals"],
+    "metadata": {"iata": "BOM"},
+    "tags": ["airport"]
+  },
+  {
+    "id": "tool-006",
+    "category": "TOOL",
+    "input": "Find flights from DEL to BOM.",
+    "description": "Search flights by route",
+    "expected_tools": ["search_flights"],
+    "metadata": {"dep_iata": "DEL", "arr_iata": "BOM"},
+    "tags": ["search"]
+  },
+  {
+    "id": "tool-007",
+    "category": "TOOL",
+    "input": "Tell me about Delhi airport",
+    "description": "Airport information",
+    "expected_tools": ["get_airport_information"],
+    "metadata": {"iata": "DEL"},
+    "tags": ["airport-info"]
+  },
+  {
+    "id": "tool-008",
+    "category": "TOOL",
+    "input": "Find flights from JFK to LAX",
+    "description": "Search flights different route",
+    "expected_tools": ["search_flights"],
+    "metadata": {"dep_iata": "JFK", "arr_iata": "LAX"},
+    "tags": ["search"]
+  }
+]

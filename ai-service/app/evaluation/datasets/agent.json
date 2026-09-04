@@ -1,0 +1,74 @@
+[
+  {
+    "id": "agent-001",
+    "category": "AGENT",
+    "input": "Find me a flight from Delhi to Mumbai tomorrow.",
+    "description": "Basic recommendation with origin/destination",
+    "expected_answer_keywords": [],
+    "expected_tools": ["search_flights"],
+    "metadata": {
+      "required_steps": ["parse_preferences", "search_flights", "score_flights", "rank_flights", "generate_recommendation"],
+      "expected_origin": "DEL",
+      "expected_destination": "BOM"
+    },
+    "tags": ["basic"]
+  },
+  {
+    "id": "agent-002",
+    "category": "AGENT",
+    "input": "Find me a direct flight from DEL to BOM.",
+    "description": "Direct flight preference",
+    "expected_answer_keywords": [],
+    "expected_tools": ["search_flights"],
+    "metadata": {
+      "required_steps": ["parse_preferences", "search_flights", "score_flights", "rank_flights", "generate_recommendation"],
+      "expected_origin": "DEL",
+      "expected_destination": "BOM",
+      "expected_direct_only": true
+    },
+    "tags": ["direct"]
+  },
+  {
+    "id": "agent-003",
+    "category": "AGENT",
+    "input": "Find me the best flight from Delhi to London, preferably direct.",
+    "description": "Long-haul with preference",
+    "expected_answer_keywords": [],
+    "expected_tools": ["search_flights"],
+    "metadata": {
+      "required_steps": ["parse_preferences", "search_flights", "score_flights", "rank_flights", "generate_recommendation"],
+      "expected_origin": "DEL",
+      "expected_destination": "LON"
+    },
+    "tags": ["long-haul"]
+  },
+  {
+    "id": "agent-004",
+    "category": "AGENT",
+    "input": "Find me a flight from BOM to DEL with budget 15000 INR.",
+    "description": "Budget-constrained recommendation — price unavailable, must not fabricate",
+    "expected_answer_keywords": [],
+    "expected_tools": ["search_flights"],
+    "metadata": {
+      "required_steps": ["parse_preferences", "search_flights", "score_flights", "rank_flights", "generate_recommendation"],
+      "expected_origin": "BOM",
+      "expected_destination": "DEL",
+      "check_no_price_fabrication": true
+    },
+    "tags": ["budget", "no-fabrication"]
+  },
+  {
+    "id": "agent-005",
+    "category": "AGENT",
+    "input": "Find cheapest flight DEL BOM",
+    "description": "Cheapest search — tests short query handling",
+    "expected_answer_keywords": [],
+    "expected_tools": ["search_flights"],
+    "metadata": {
+      "required_steps": ["parse_preferences", "search_flights", "score_flights", "rank_flights", "generate_recommendation"],
+      "expected_origin": "DEL",
+      "expected_destination": "BOM"
+    },
+    "tags": ["cheap"]
+  }
+]
