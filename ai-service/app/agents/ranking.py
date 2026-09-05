@@ -32,9 +32,16 @@ WEIGHTS = {
 def _score_direct_preference(
     candidate: FlightCandidate, preferences: UserPreferences
 ) -> float:
-    """Score based on whether the flight is direct and user prefers direct."""
+    """Score based on whether the flight is direct and user prefers direct.
+
+    Returns:
+        1.0 — preference specified and flight matches
+        0.5 — no preference specified (neutral, does not favour or penalise)
+        0.0 — preference specified but flight does not match
+        0.5 — preference specified but flight direct-status unknown
+    """
     if not preferences.direct_only:
-        return 1.0
+        return 0.5
 
     if candidate.is_direct is None:
         return 0.5
@@ -141,9 +148,17 @@ def _score_delay_risk(
 def _score_airline_match(
     candidate: FlightCandidate, preferences: UserPreferences
 ) -> float:
-    """Score based on airline preference match. Returns 0.0-1.0."""
+    """Score based on airline preference match.
+
+    Returns:
+        1.0 — preference specified and airline matches exactly
+        0.8 — preference specified and airline partially matches
+        0.5 — no airline preference specified (neutral)
+        0.5 — preference specified but candidate has no airline data
+        0.3 — preference specified but airline does not match
+    """
     if not preferences.airline_preference:
-        return 1.0
+        return 0.5
 
     if not candidate.airline:
         return 0.5

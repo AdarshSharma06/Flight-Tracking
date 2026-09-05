@@ -847,7 +847,7 @@ class TestIgnoreSavedPreferences:
         # Without stored airline preference (ignore requested)
         prefs_without = UserPreferences()
         score_without = _score_airline_match(candidate, prefs_without)
-        assert score_without == 1.0  # No preference → returns 1.0 (neutral)
+        assert score_without == 0.5  # No preference → returns 0.5 (neutral)
 
     def test_ignore_scoring_state_no_direct_preference(self):
         """When ignore is requested, scoring must not give direct preference credit."""
@@ -869,5 +869,83 @@ class TestIgnoreSavedPreferences:
         # Without stored direct preference (ignore requested)
         prefs_without = UserPreferences()
         score_without = _score_direct_preference(candidate, prefs_without)
-        # direct_only=False → returns 1.0 (neutral, no preference)
-        assert score_without == 1.0
+        # direct_only=False → returns 0.5 (neutral, no preference)
+        assert score_without == 0.5
+
+    def test_production_ignore_scenario_exact_scores(self):
+        """Exact production scenario: ignore saved preferences → neutral scores throughout.
+
+        User: "Find me any flight from Delhi to Mumbai. Ignore my saved flight preferences for this request."
+        Expected: airline_match=0.5, direct_preference=0.5 (both neutral, no stored prefs applied).
+        """
+        from app.agents.ranking import _score_airline_match, _score_direct_preference, score_flight
+        from app.agents.state import FlightCandidate
+
+        candidate = FlightCandidate(
+            flight_number="AI302",
+            origin="DEL",
+            destination="BOM",
+            departure_time="2025-01-15T10:00",
+            arrival_time="2025-01-15T12:00",
+            airline="AI",
+            status="active",
+            is_direct=True,
+        )
+
+        # Preferences after ignore: all neutral (no stored prefs loaded)
+        prefs = UserPreferences()
+
+        # Direct preference must be 0.5 (neutral), NOT 1.0 (which would imply a stored preference)
+        assert _score_direct_preference(candidate, prefs) == 0.5
+
+        # Airline match must be 0.5 (neutral), NOT 1.0 (which would imply stored airline preference)
+        assert _score_airline_match(candidate, prefs) == 0.5
+
+        # Full score should reflect neutral preference scores
+        sf = score_flight(candidate, prefs)
+        assert sf.score_breakdown["direct_preference"] == 0.5
+        assert sf.score_breakdown["airline_match"] == 0.5
+
+    def test_production_ignore_scenario_vs_stored_airline(self):
+        """Verify scoring distinguishes 'no preference' from 'stored airline matched'.
+
+        When airline_preference is set and matches → airline_match=1.0
+        When airline_preference is None (ignore requested) → airline_match=0.5
+        """
+        from app.agents.ranking import _score_airline_match
+        from app.agents.state import FlightCandidate
+
+        candidate = FlightCandidate(
+            flight_number="AI302",
+            origin="DEL",
+            destination="BOM",
+            airline="AI",
+        )
+
+        # Stored preference matched
+        assert _score_airline_match(candidate, UserPreferences(airline_preference="AI")) == 1.0
+
+        # No preference (ignore requested) → 0.5, NOT 1.0
+        assert _score_airline_match(candidate, UserPreferences()) == 0.5
+
+    def test_production_ignore_scenario_vs_stored_direct(self):
+        """Verify scoring distinguishes 'no preference' from 'stored direct matched'.
+
+        When direct_only=True and flight is direct → direct_preference=1.0
+        When direct_only=False (ignore requested) → direct_preference=0.5
+        """
+        from app.agents.ranking import _score_direct_preference
+        from app.agents.state import FlightCandidate
+
+        candidate = FlightCandidate(
+            flight_number="AI302",
+            origin="DEL",
+            destination="BOM",
+            is_direct=True,
+        )
+
+        # Stored preference matched
+        assert _score_direct_preference(candidate, UserPreferences(direct_only=True)) == 1.0
+
+        # No preference (ignore requested) → 0.5, NOT 1.0
+        assert _score_direct_preference(candidate, UserPreferences(direct_only=False)) == 0.5

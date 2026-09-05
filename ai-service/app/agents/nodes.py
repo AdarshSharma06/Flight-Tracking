@@ -496,6 +496,19 @@ async def generate_recommendation(
 USER REQUEST:
 {state.user_request}{budget_info}
 
+PARSED PREFERENCES (what the system extracted from the request):
+{json.dumps({
+    "origin": state.preferences.origin if state.preferences else None,
+    "destination": state.preferences.destination if state.preferences else None,
+    "travel_date": state.preferences.travel_date if state.preferences else None,
+    "travel_time": state.preferences.travel_time if state.preferences else None,
+    "direct_only": state.preferences.direct_only if state.preferences else False,
+    "airline_preference": state.preferences.airline_preference if state.preferences else None,
+    "budget": state.preferences.budget if state.preferences else None,
+}, indent=2)}
+NOTE: If a preference field above is null/false/None, the user did NOT request it.
+Do NOT claim the flight matches a preference the user did not specify.
+
 TOP RECOMMENDED FLIGHT:
 Flight: {top.candidate.flight_number}
 Route: {top.candidate.origin or 'unknown'} → {top.candidate.destination or 'unknown'}
@@ -507,6 +520,7 @@ Score: {top.score}/1.0
 
 SCORE BREAKDOWN:
 {json.dumps(top.score_breakdown, indent=2)}
+NOTE: A score of 0.5 for direct_preference or airline_match means no preference was specified (neutral). A score of 1.0 means the preference matched. A score below 0.5 means the preference was specified but not matched.
 
 WEATHER (if available):
 {data_summary.get('weather', 'Not available')}

@@ -103,7 +103,7 @@ class TestScoring:
     def test_score_direct_preference_no_preference(self):
         c = FlightCandidate(flight_number="AI302", is_direct=False)
         prefs = UserPreferences(direct_only=False)
-        assert _score_direct_preference(c, prefs) == 1.0
+        assert _score_direct_preference(c, prefs) == 0.5
 
     def test_score_direct_preference_unknown(self):
         c = FlightCandidate(flight_number="AI302", is_direct=None)
@@ -146,7 +146,7 @@ class TestScoring:
 
     def test_score_status_active(self):
         c = FlightCandidate(flight_number="AI302", status="active")
-        assert _score_direct_preference(c, UserPreferences()) == 1.0
+        assert _score_direct_preference(c, UserPreferences()) == 0.5
 
     def test_score_delay_risk_unavailable(self):
         assert _score_weather_impact(None) == 0.5
@@ -154,7 +154,7 @@ class TestScoring:
     def test_score_airline_match_no_preference(self):
         c = FlightCandidate(flight_number="AI302", airline="AI")
         prefs = UserPreferences()
-        assert _score_airline_match(c, prefs) == 1.0
+        assert _score_airline_match(c, prefs) == 0.5
 
     def test_score_airline_match_exact(self):
         c = FlightCandidate(flight_number="AI302", airline="AI")
