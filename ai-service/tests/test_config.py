@@ -43,3 +43,92 @@ def test_get_settings_cached():
     settings1 = get_settings()
     settings2 = get_settings()
     assert settings1 is settings2
+
+
+def test_spring_boot_base_url_from_env():
+    """SPRING_BOOT_BASE_URL is loaded from configuration (canonical var)."""
+    os.environ["SPRING_BOOT_BASE_URL"] = "https://api.example.com"
+    try:
+        settings = Settings()
+        assert settings.spring_boot_base_url == "https://api.example.com"
+    finally:
+        if "SPRING_BOOT_BASE_URL" in os.environ:
+            del os.environ["SPRING_BOOT_BASE_URL"]
+
+
+def test_spring_boot_base_url_blank_treated_as_none():
+    """Blank / whitespace URL is normalized to None (handled clearly)."""
+    os.environ["SPRING_BOOT_BASE_URL"] = "   "
+    try:
+        settings = Settings()
+        assert settings.spring_boot_base_url is None
+    finally:
+        if "SPRING_BOOT_BASE_URL" in os.environ:
+            del os.environ["SPRING_BOOT_BASE_URL"]
+
+    os.environ["SPRING_BOOT_BASE_URL"] = ""
+    try:
+        settings = Settings()
+        assert settings.spring_boot_base_url is None
+    finally:
+        if "SPRING_BOOT_BASE_URL" in os.environ:
+            del os.environ["SPRING_BOOT_BASE_URL"]
+
+
+def test_spring_boot_base_url_trailing_slash_stripped():
+    """Trailing slash is stripped for consistent URL construction."""
+    os.environ["SPRING_BOOT_BASE_URL"] = "https://api.example.com/"
+    try:
+        settings = Settings()
+        assert settings.spring_boot_base_url == "https://api.example.com"
+    finally:
+        if "SPRING_BOOT_BASE_URL" in os.environ:
+            del os.environ["SPRING_BOOT_BASE_URL"]
+
+    os.environ["SPRING_BOOT_BASE_URL"] = "https://api.example.com///"
+    try:
+        settings = Settings()
+        assert settings.spring_boot_base_url == "https://api.example.com"
+    finally:
+        if "SPRING_BOOT_BASE_URL" in os.environ:
+            del os.environ["SPRING_BOOT_BASE_URL"]
+
+
+def test_spring_boot_base_url_alias_backend_url():
+    """Alias BACKEND_URL is accepted for backwards compatibility."""
+    # Ensure canonical is not set
+    if "SPRING_BOOT_BASE_URL" in os.environ:
+        del os.environ["SPRING_BOOT_BASE_URL"]
+    os.environ["BACKEND_URL"] = "https://backend.example.com"
+    try:
+        settings = Settings()
+        assert settings.spring_boot_base_url == "https://backend.example.com"
+    finally:
+        if "BACKEND_URL" in os.environ:
+            del os.environ["BACKEND_URL"]
+
+
+def test_spring_boot_base_url_alias_spring_boot_url():
+    """Alias SPRING_BOOT_URL is accepted."""
+    if "SPRING_BOOT_BASE_URL" in os.environ:
+        del os.environ["SPRING_BOOT_BASE_URL"]
+    os.environ["SPRING_BOOT_URL"] = "https://alt.example.com"
+    try:
+        settings = Settings()
+        assert settings.spring_boot_base_url == "https://alt.example.com"
+    finally:
+        if "SPRING_BOOT_URL" in os.environ:
+            del os.environ["SPRING_BOOT_URL"]
+
+
+def test_spring_boot_base_url_alias_backend_base_url():
+    """Alias BACKEND_BASE_URL is accepted."""
+    if "SPRING_BOOT_BASE_URL" in os.environ:
+        del os.environ["SPRING_BOOT_BASE_URL"]
+    os.environ["BACKEND_BASE_URL"] = "https://backend2.example.com"
+    try:
+        settings = Settings()
+        assert settings.spring_boot_base_url == "https://backend2.example.com"
+    finally:
+        if "BACKEND_BASE_URL" in os.environ:
+            del os.environ["BACKEND_BASE_URL"]

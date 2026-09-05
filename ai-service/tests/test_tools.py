@@ -283,6 +283,7 @@ class TestSpringBootClient:
             mock_settings.return_value = MagicMock(
                 spring_boot_base_url="http://localhost:8080",
                 ai_service_api_key="test-key",
+                environment="development",
             )
             mock_http = AsyncMock()
             mock_response = MagicMock()
@@ -295,6 +296,188 @@ class TestSpringBootClient:
                 client._client = None
                 result = await client.get("/api/ai/proxy/flights/AI302")
                 assert result == {"status": "UP"}
+
+    @pytest.mark.asyncio
+    async def test_client_base_url_loaded_from_config(self):
+        """Base URL is loaded from configuration and used for request."""
+        from app.tools import client
+        with patch("app.tools.client.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                spring_boot_base_url="https://backend.example.com",
+                ai_service_api_key="test-key",
+                environment="production",
+            )
+            mock_http = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.return_value = {"ok": True}
+            mock_http.request = AsyncMock(return_value=mock_response)
+            mock_http.base_url = "https://backend.example.com"
+            mock_http.is_closed = False
+
+            with patch("app.tools.client.httpx.AsyncClient", return_value=mock_http) as mock_cls:
+                client._client = None
+                await client.get("/api/ai/proxy/airports/DEL")
+                # Verify AsyncClient was constructed with correct base_url
+                assert mock_cls.called
+                called_kwargs = mock_cls.call_args[1]
+                assert called_kwargs["base_url"] == "https://backend.example.com"
+                # Verify request path is correct (not hardcoded AviationStack)
+                mock_http.request.assert_called_once()
+                args, kwargs = mock_http.request.call_args
+                assert args[0] == "GET"
+                assert args[1] == "/api/ai/proxy/airports/DEL"
+
+    @pytest.mark.asyncio
+    async def test_client_trailing_slash_stripped(self):
+        """Trailing slash in env var is stripped so URL construction is correct."""
+        from app.tools import client
+        with patch("app.tools.client.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                spring_boot_base_url="https://backend.example.com/",
+                ai_service_api_key="test-key",
+                environment="production",
+            )
+            # get_spring_boot_base_url should strip slash
+            url = client.get_spring_boot_base_url()
+            assert url == "https://backend.example.com"
+
+            mock_http = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.return_value = {"ok": True}
+            mock_http.request = AsyncMock(return_value=mock_response)
+            mock_http.is_closed = True
+
+            with patch("app.tools.client.httpx.AsyncClient", return_value=mock_http) as mock_cls:
+                client._client = None
+                await client.get("/api/ai/proxy/flights/AI302")
+                called_kwargs = mock_cls.call_args[1]
+                assert called_kwargs["base_url"] == "https://backend.example.com"
+
+    @pytest.mark.asyncio
+    async def test_client_missing_url_handled_clearly_production(self):
+        """Missing/blank URL in production returns clear error, does not log None, does not call network."""
+        from app.tools import client
+        with patch("app.tools.client.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                spring_boot_base_url=None,
+                ai_service_api_key="test-key",
+                environment="production",
+            )
+            client._client = None
+            result = await client.get("/api/ai/proxy/flights/AI302")
+            assert "error" in result
+            assert "SPRING_BOOT_BASE_URL" in result["error"]
+            assert "not configured" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_client_blank_url_handled_clearly(self):
+        """Blank/whitespace URL is treated as missing."""
+        from app.tools import client
+        with patch("app.tools.client.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                spring_boot_base_url="   ",
+                ai_service_api_key="test-key",
+                environment="production",
+            )
+            client._client = None
+            result = await client.get("/api/ai/proxy/airports/DEL")
+            assert "error" in result
+            assert "SPRING_BOOT_BASE_URL" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_client_constructs_correct_flight_status_url(self):
+        """get_flight_status tool constructs correct Spring Boot proxy URL."""
+        from app.tools import client
+        with patch("app.tools.client.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                spring_boot_base_url="https://backend.example.com",
+                ai_service_api_key="k",
+                environment="production",
+            )
+            mock_http = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.return_value = {"flightNumber": "AI302", "status": "active"}
+            mock_http.request = AsyncMock(return_value=mock_response)
+            mock_http.is_closed = True
+            with patch("app.tools.client.httpx.AsyncClient", return_value=mock_http):
+                client._client = None
+                result = await client.get("/api/ai/proxy/flights/AI302")
+                assert result["flightNumber"] == "AI302"
+                # Ensure path is Spring Boot proxy, not AviationStack
+                path = mock_http.request.call_args[0][1]
+                assert path.startswith("/api/ai/proxy/flights/")
+
+    @pytest.mark.asyncio
+    async def test_client_constructs_correct_airport_url(self):
+        """get_airport_information tool constructs correct Spring Boot proxy URL."""
+        from app.tools import client
+        with patch("app.tools.client.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                spring_boot_base_url="https://backend.example.com",
+                ai_service_api_key="k",
+                environment="production",
+            )
+            mock_http = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.return_value = {"iata": "DEL"}
+            mock_http.request = AsyncMock(return_value=mock_response)
+            mock_http.is_closed = True
+            with patch("app.tools.client.httpx.AsyncClient", return_value=mock_http):
+                client._client = None
+                result = await client.get("/api/ai/proxy/airports/DEL")
+                assert result["iata"] == "DEL"
+                path = mock_http.request.call_args[0][1]
+                assert path == "/api/ai/proxy/airports/DEL"
+
+    @pytest.mark.asyncio
+    async def test_client_never_logs_none(self):
+        """ConnectError logging never shows 'None' — validates None bug fix."""
+        from app.tools import client
+        import logging
+        with patch("app.tools.client.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                spring_boot_base_url="https://backend.example.com",
+                ai_service_api_key="k",
+                environment="production",
+            )
+            mock_http = AsyncMock()
+            mock_http.request = AsyncMock(side_effect=client.httpx.ConnectError("fake"))
+            mock_http.is_closed = True
+            with patch("app.tools.client.httpx.AsyncClient", return_value=mock_http):
+                client._client = None
+                with patch.object(client.logger, "error") as mock_log:
+                    result = await client.get("/api/ai/proxy/flights/AI302")
+                    assert "error" in result
+                    # Ensure logged URL is not None
+                    for call in mock_log.call_args_list:
+                        args = call[0]
+                        assert "None" not in str(args)
+
+    @pytest.mark.asyncio
+    async def test_client_preserves_auth_header(self):
+        """X-AI-Service-Key header is preserved."""
+        from app.tools import client
+        with patch("app.tools.client.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                spring_boot_base_url="https://backend.example.com",
+                ai_service_api_key="secret-123",
+                environment="production",
+            )
+            mock_http = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.return_value = {"ok": True}
+            mock_http.request = AsyncMock(return_value=mock_response)
+            mock_http.is_closed = True
+            with patch("app.tools.client.httpx.AsyncClient", return_value=mock_http):
+                client._client = None
+                await client.get("/api/ai/proxy/flights/AI302")
+                headers = mock_http.request.call_args[1]["headers"]
+                assert headers.get("X-AI-Service-Key") == "secret-123"
 
 
 # ===== LLM Tool Calling =====

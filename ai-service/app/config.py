@@ -2,6 +2,7 @@
 
 import os
 from functools import lru_cache
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
@@ -13,6 +14,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     # Service
@@ -37,7 +39,18 @@ class Settings(BaseSettings):
     vector_database_url: Optional[str] = None
 
     # Spring Boot Backend
-    spring_boot_base_url: Optional[str] = None
+    # Primary env var: SPRING_BOOT_BASE_URL
+    # Aliases accepted for backwards/forwards compatibility if Render was configured with an alternate name.
+    # Do NOT hardcode production URLs — value must come from environment.
+    spring_boot_base_url: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SPRING_BOOT_BASE_URL",
+            "SPRING_BOOT_URL",
+            "BACKEND_URL",
+            "BACKEND_BASE_URL",
+        ),
+    )
 
     # Observability
     log_level: str = "INFO"
@@ -49,6 +62,24 @@ class Settings(BaseSettings):
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
+
+    @field_validator("spring_boot_base_url", mode="before")
+    @classmethod
+    def _normalize_spring_boot_base_url(cls, v):
+        """Normalize Spring Boot base URL: blank/whitespace -> None, strip trailing slash."""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                return None
+            return stripped.rstrip("/")
+        return v
+
+    @property
+    def effective_spring_boot_base_url(self) -> Optional[str]:
+        """Return normalized Spring Boot base URL or None if not configured."""
+        return self.spring_boot_base_url
 
 
 @lru_cache
