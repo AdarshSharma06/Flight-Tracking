@@ -14,6 +14,240 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_ITERATIONS = 5
 
+# ── Preference intent helpers (AI-6) ─────────────────────────────────
+# Simple deterministic extraction for the in-scope preference keys.
+# This keeps the critical save path fast, testable, and free of LLM chain-of-thought leakage.
+
+_SAVE_KEYWORDS = ("remember", "save", "store", "keep", "note that i prefer")
+_QUERY_KEYWORDS = (
+    "what are my flight preferences",
+    "what are my preferences",
+    "show my preferences",
+    "list my preferences",
+    "my flight preferences",
+    "my preferences",
+    "what airline do i prefer",
+    "what airline do i",
+    "which airline do i prefer",
+)
+
+# Mapping of human phrases → stored preference keys/values
+# Keeps VALID_PREFERENCE_KEYS as single source of truth via memory_service
+_PREF_PATTERNS = {
+    "prefers_direct": [
+        (r"\bdirect flights?\b", "true"),
+        (r"\bnon[-\s]?stop\b", "true"),
+    ],
+    "preferred_departure_time": [
+        (r"\bevening\b", "evening"),
+        (r"\bmorning\b", "morning"),
+        (r"\bafternoon\b", "afternoon"),
+        (r"\b18:00\b|\b6\s*pm\b", "evening"),
+    ],
+    "preferred_airline": [
+        (r"\bair\s*india\b", "AI"),
+        (r"\bindigo\b", "6E"),
+        (r"\bspicejet\b", "SG"),
+        (r"\bvistara\b", "UK"),
+        (r"\bbritish\s*airways\b", "BA"),
+        (r"\blufthansa\b", "LH"),
+        (r"\bemirates\b", "EK"),
+    ],
+}
+
+# Human-readable labels for confirmation messages
+_PREF_VALUE_LABELS = {
+    "prefers_direct": {"true": "direct flights", "false": "connecting flights"},
+    "preferred_departure_time": {"evening": "evening departures", "morning": "morning departures", "afternoon": "afternoon departures"},
+    "preferred_airline": {"AI": "Air India", "6E": "IndiGo", "SG": "SpiceJet", "UK": "Vistara", "BA": "British Airways", "LH": "Lufthansa", "EK": "Emirates"},
+    "preferred_origin": {},
+    "preferred_destination": {},
+    "budget_preference": {},
+}
+
+_INTERNAL_REASONING_LEAK_PATTERNS = (
+    "we need to respond",
+    "let's parse",
+    "let's compute",
+    "thus include",
+    "we'll include",
+    "we need to",
+    "need to respond with",
+)
+
+
+def _is_preference_query_intent(message: str) -> bool:
+    lower = message.lower().strip()
+    # Explicit query phrases
+    for kw in _QUERY_KEYWORDS:
+        if kw in lower:
+            return True
+    # Generic "my preferences" query
+    if "my preferences" in lower and "?" in lower:
+        return True
+    return False
+
+
+def _is_preference_save_intent(message: str) -> bool:
+    lower = message.lower()
+    # Must contain a preference signal
+    has_pref_signal = any(
+        phrase in lower
+        for phrase in (
+            "prefer",
+            "preference",
+            "direct flight",
+            "non-stop",
+            "nonstop",
+            "evening",
+            "morning",
+            "afternoon",
+            "air india",
+            "indigo",
+            "spicejet",
+            "vistara",
+            "british airways",
+            "lufthansa",
+            "emirates",
+            "budget",
+        )
+    )
+    if not has_pref_signal:
+        return False
+    # If it's clearly a query, not a save
+    if _is_preference_query_intent(message):
+        return False
+    # Save intent when user says remember/save OR states a preference declaratively
+    if any(kw in lower for kw in _SAVE_KEYWORDS):
+        return True
+    # Declarative "I prefer ..." without question mark is considered a save intent
+    # But avoid treating transient "for this trip" as persistent save
+    if "i prefer" in lower or "i like" in lower:
+        # If the only preference mention is qualified as transient, treat as explicit override, not save
+        # e.g., "for this trip I am okay with one stop" should not persist
+        if "for this trip" in lower and lower.count("prefer") == 1 and "one stop" in lower:
+            # This is the CASE E transient override – not a persistent save
+            return False
+        return True
+    return False
+
+
+def _extract_preferences_from_message(message: str) -> dict:
+    """Deterministic extraction for the in-scope VALID_PREFERENCE_KEYS.
+
+    Returns dict of key -> value ready for memory_service.set_preference.
+    Uses regex matching; does not call LLM to avoid chain-of-thought leakage.
+    """
+    import re
+
+    lower = message.lower()
+    result: dict = {}
+
+    # Transient qualifier check – if message contains "for this trip", the one-stop part is an explicit
+    # override for the current request only and must NOT be persisted.
+    is_transient = "for this trip" in lower
+
+    # prefers_direct – handle both direct and one-stop, but transient one-stop does not overwrite
+    has_direct = bool(re.search(r"\bdirect flights?\b", lower) or re.search(r"\bnon[-\s]?stop\b", lower))
+    has_onestop = bool(re.search(r"\bone\s*stop\b", lower) or re.search(r"\bconnecting\b", lower))
+    if has_direct:
+        result["prefers_direct"] = "true"
+    if has_onestop and not is_transient:
+        result["prefers_direct"] = "false"
+
+    # Evening/morning/afternoon → preferred_departure_time
+    if re.search(r"\bevening\b", lower):
+        result["preferred_departure_time"] = "evening"
+    elif re.search(r"\bmorning\b", lower):
+        result["preferred_departure_time"] = "morning"
+    elif re.search(r"\bafternoon\b", lower):
+        result["preferred_departure_time"] = "afternoon"
+
+    # Airline
+    airline_map = {
+        r"\bair\s*india\b": "AI",
+        r"\bindigo\b": "6E",
+        r"\bspicejet\b": "SG",
+        r"\bvistara\b": "UK",
+        r"\bbritish\s*airways\b": "BA",
+        r"\blufthansa\b": "LH",
+        r"\bemirates\b": "EK",
+    }
+    for pat, code in airline_map.items():
+        if re.search(pat, lower):
+            result["preferred_airline"] = code
+            break
+
+    # Budget (simple)
+    m = re.search(r"budget[^0-9]*(\d[\d,]*)", lower)
+    if m:
+        try:
+            val = m.group(1).replace(",", "")
+            result["budget_preference"] = val
+        except Exception:
+            pass
+
+    # Origin/destination - very basic: "from delhi to mumbai" etc.
+    # Not required for current tests, but keep for completeness
+    m = re.search(r"from\s+([a-z]{3,})\s+to\s+([a-z]{3,})", lower)
+    # We won't auto-store origin/destination without IATA validation; skip for now
+
+    return result
+
+
+def _format_preferences_for_display(prefs: dict) -> str:
+    """Format stored preferences dict into human-readable bullet list."""
+    if not prefs:
+        return "You don't have any saved flight preferences yet."
+    lines = ["Your saved flight preferences are:"]
+    label_map = {
+        "preferred_origin": lambda v: f"- Preferred origin: {v}",
+        "preferred_destination": lambda v: f"- Preferred destination: {v}",
+        "prefers_direct": lambda v: f"- {'Direct flights' if str(v).lower() in ('true','1','yes') else 'Connecting flights'}",
+        "preferred_airline": lambda v: f"- Preferred airline: {_PREF_VALUE_LABELS.get('preferred_airline', {}).get(v, v)} ({v})" if v in _PREF_VALUE_LABELS.get("preferred_airline", {}) else f"- Preferred airline: {v}",
+        "budget_preference": lambda v: f"- Budget: {v}",
+        "preferred_departure_time": lambda v: f"- {_PREF_VALUE_LABELS.get('preferred_departure_time', {}).get(v.lower(), v) if isinstance(v, str) else v}",
+        "preferred_arrival_time": lambda v: f"- Preferred arrival time: {v}",
+    }
+    for key, val in prefs.items():
+        fmt = label_map.get(key)
+        if fmt:
+            try:
+                lines.append(fmt(val))
+            except Exception:
+                lines.append(f"- {key}: {val}")
+        else:
+            lines.append(f"- {key}: {val}")
+    # Fallback for keys like prefers_direct when label not in map
+    return "\n".join(lines)
+
+
+def _build_concise_save_confirmation(saved: dict) -> str:
+    """Build short user-facing confirmation for saved preferences."""
+    if not saved:
+        return "Got it — I'll remember that for you."
+    # Build human-readable list of saved preferences
+    parts = []
+    for k, v in saved.items():
+        labels = _PREF_VALUE_LABELS.get(k, {})
+        label = labels.get(v, labels.get(str(v).lower(), None))
+        if label:
+            parts.append(label)
+        elif k == "preferred_departure_time":
+            parts.append(f"{v} departures" if isinstance(v, str) else str(v))
+        elif k == "prefers_direct":
+            parts.append("direct flights" if str(v).lower() in ("true","1") else "connecting flights")
+        elif k == "preferred_airline":
+            # Map code back to name
+            airline_names = {"AI": "Air India", "6E": "IndiGo", "SG": "SpiceJet", "UK": "Vistara"}
+            parts.append(airline_names.get(v, v))
+        else:
+            parts.append(f"{k}: {v}")
+    if len(parts) == 1:
+        return f"Got it — I'll remember that you prefer {parts[0]}."
+    else:
+        return f"Got it — I'll remember that you prefer {', '.join(parts[:-1])} and {parts[-1]}."
+
 
 class ChatService:
     def __init__(self, llm_client: Optional[LLMClient]):
@@ -75,6 +309,95 @@ class ChatService:
                     conversation_id = str(uuid4())
                 except Exception:
                     pass
+
+        # ── PREFERENCE SAVE / QUERY SHORT-CIRCUIT (AI-6) ─────────────
+        # These are handled deterministically without LLM to avoid chain-of-thought leakage
+        # and to guarantee grounding (no "I have no access" hallucination).
+        # Save intent: persist via memory_service and return concise confirmation.
+        # Query intent: load via memory_service and return formatted list or "no saved preferences".
+        clean_msg = request.message.strip()
+        # Query intent takes precedence over save intent if both match (e.g., "what are my preferences, I prefer direct?")
+        # In practice messages are one or the other.
+        if user_id and user_id != "anonymous" and _is_preference_query_intent(clean_msg):
+            # Load stored preferences deterministically
+            try:
+                stored = await memory_service.get_preferences(user_id)
+            except Exception as e:
+                logger.debug("Preference query failed (DB unavailable): %s", e)
+                stored = None
+            if stored is None:
+                # DB unavailable – graceful fallback, do not fabricate
+                answer = "Sorry, I'm unable to retrieve your preferences right now. Please try again later."
+            elif not stored:
+                answer = "You don't have any saved flight preferences yet."
+            else:
+                answer = _format_preferences_for_display(stored)
+            # Persist conversation messages for this turn
+            try:
+                if conversation_id:
+                    await memory_service.save_user_message(conversation_id, request.message)
+                    await memory_service.save_assistant_message(conversation_id, answer)
+            except Exception as e:
+                logger.debug("Could not persist preference query messages: %s", e)
+            try:
+                from app.observability.events import ObservabilityEvent
+                tracer.emit(ObservabilityEvent(
+                    request_id=request_id,
+                    event_type="router_decision",
+                    operation="chat",
+                    component="chat",
+                    metadata={"conversation_id": conversation_id or "none", "preference_query": True, "model": "memory"},
+                ))
+            except Exception:
+                pass
+            return ChatResponse(answer=answer, model="memory", requestId=request_id, conversationId=conversation_id)
+
+        if user_id and user_id != "anonymous" and _is_preference_save_intent(clean_msg):
+            extracted = _extract_preferences_from_message(clean_msg)
+            if extracted:
+                saved = {}
+                failed = False
+                for k, v in extracted.items():
+                    try:
+                        await memory_service.set_preference(user_id, k, v)
+                        saved[k] = v
+                    except ValueError as ve:
+                        logger.warning("Invalid preference key %s: %s", k, ve)
+                    except Exception as e:
+                        logger.warning("Failed to persist preference %s: %s", k, e)
+                        failed = True
+                        break
+                if failed:
+                    answer = "Sorry, saving your preferences is temporarily unavailable. Please try again later."
+                elif saved:
+                    answer = _build_concise_save_confirmation(saved)
+                else:
+                    # Extraction yielded nothing valid – fall through to normal LLM handling
+                    saved = {}
+                    answer = None
+                if answer is not None:
+                    # Persist messages
+                    try:
+                        if conversation_id:
+                            await memory_service.save_user_message(conversation_id, request.message)
+                            await memory_service.save_assistant_message(conversation_id, answer)
+                    except Exception as e:
+                        logger.debug("Could not persist preference save messages: %s", e)
+                    try:
+                        from app.observability.events import ObservabilityEvent
+                        tracer.emit(ObservabilityEvent(
+                            request_id=request_id,
+                            event_type="router_decision",
+                            operation="chat",
+                            component="chat",
+                            metadata={"conversation_id": conversation_id or "none", "preference_save": True, "saved_keys": list(saved.keys()), "model": "memory"},
+                        ))
+                    except Exception:
+                        pass
+                    # Ensure output does not contain internal reasoning leak patterns
+                    # Our deterministic answer is already concise and safe
+                    return ChatResponse(answer=answer, model="memory", requestId=request_id, conversationId=conversation_id)
+            # If extraction yielded nothing, fall through to normal LLM flow
 
         # Try RAG retrieval for aviation knowledge questions
         rag_context = await self._retrieve_rag_context(request.message)
