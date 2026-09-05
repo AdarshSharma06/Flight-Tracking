@@ -316,6 +316,79 @@ class ChatService:
         if has_weather_tool and not wind_was_available:
             grounding["windSpeed"] = None
             # Also mark altitude/speed as available only if live was
+        # ── FLIGHT STATUS GROUNDING (field-specific) ─────────────────
+        # Extract flight-status fields so departureDelay vs arrivalDelay are
+        # validated separately, and terminal/gate/status claims are grounded.
+        # This prevents cross-field reuse (e.g., arrival delay 4 → departure delay 4).
+        flight_fields = [
+            "departureDelay", "arrivalDelay",
+            "departureScheduled", "departureActual", "arrivalScheduled", "arrivalActual",
+            "departureTerminal", "departureGate", "arrivalTerminal", "arrivalGate",
+            "status", "flightNumber",
+            "terminal", "gate",  # generic fallback for simple tool payloads
+        ]
+        # Collect from any tool result that looks like a flight DTO
+        for msg in messages:
+            if msg.role != "tool" or not msg.content:
+                continue
+            content = msg.content
+            # Only try to parse JSON tool results
+            stripped = content.strip()
+            if not stripped.startswith("{"):
+                continue
+            try:
+                data = _json.loads(content)
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            # Detect flight status payload (FlightDto or FlightTrackingDto)
+            # Keys are camelCase: departureDelay, arrivalDelay, etc.
+            has_flight_keys = any(k in data for k in ("departureDelay", "arrivalDelay", "departureScheduled", "flightNumber", "status"))
+            # Also handle nested single-flight search wrapper: {"flights":[{...}]}
+            if not has_flight_keys and "flights" in data and isinstance(data["flights"], list) and data["flights"]:
+                # Use first flight for grounding (status request is single flight)
+                first = data["flights"][0] if isinstance(data["flights"][0], dict) else {}
+                if any(k in first for k in ("departureDelay", "arrivalDelay")):
+                    data = first
+                    has_flight_keys = True
+                else:
+                    continue
+            if not has_flight_keys:
+                continue
+            # Map each flight field into grounding
+            for field in flight_fields:
+                # Generic terminal/gate fallback: map to specific terminals if available
+                if field == "terminal":
+                    dep_t = data.get("departureTerminal")
+                    arr_t = data.get("arrivalTerminal")
+                    # If both terminals are null, terminal is unavailable → any "Terminal X" is hallucination
+                    if dep_t is None and arr_t is None:
+                        grounding["terminal"] = None
+                    else:
+                        # At least one terminal present → consider terminal claims grounded (avoid false positive)
+                        # Store as True so sanitization doesn't trigger for unavailable check
+                        grounding["terminal"] = True
+                    continue
+                if field == "gate":
+                    dep_g = data.get("departureGate")
+                    arr_g = data.get("arrivalGate")
+                    if dep_g is None and arr_g is None:
+                        grounding["gate"] = None
+                    else:
+                        grounding["gate"] = True
+                    continue
+                # Direct field mapping
+                if field in data:
+                    # Keep original value (String or null). For delay fields, keep string like "45"/"4"
+                    # For timestamps, keep ISO string; grounding check uses pattern presence + mismatch for delays
+                    grounding[field] = data.get(field)
+                # Also map snake_case variants if provider ever uses them
+                # (e.g., departure_delay) – normalize
+                snake = "".join(["_" + c.lower() if c.isupper() else c for c in field]).lstrip("_")
+                if snake in data and field not in grounding:
+                    grounding[field] = data.get(snake)
+
         # Price/prediction are never available via chat tools — if LLM
         # tries to claim them, it's always a hallucination. Only flag if
         # output actually tries to claim them, so mark as unavailable
@@ -323,10 +396,26 @@ class ChatService:
         grounding["price"] = None
         grounding["delay_probability"] = None
 
-        # Remove trivially available entries (True) — only unavailable matters
-        # Keep only None/False for blocking, and numeric actuals for mismatch
-        grounding = {k: v for k, v in grounding.items() if v is None or isinstance(v, (int, float))}
-        return grounding
+        # Keep grounding entries that are None (hallucination check) or numeric/str values for mismatch.
+        # For flight delays, keep string values like "45"/"4" as they are comparable as numeric.
+        # For terminals/gates/status, keep None vs actual string.
+        filtered = {}
+        for k, v in grounding.items():
+            if v is None or v is False:
+                filtered[k] = v
+            elif isinstance(v, (int, float)):
+                filtered[k] = v
+            elif isinstance(v, str) and v.strip() != "" and v.strip().lower() not in ("null", "none"):
+                # Keep flight string fields (delays, terminals, gates, status, timestamps)
+                # Delays are kept as strings for numeric comparison; timestamps/terminals for existence check
+                filtered[k] = v
+            elif v is True:
+                # Marker for generic terminal/gate available – keep only if you want to allow claims
+                # But for grounding, True means "available" – we drop it so it doesn't trigger unavailable block.
+                # So skip True entries (they indicate no violation)
+                continue
+            # Drop empty strings / True markers
+        return filtered
 
     def _build_system_prompt(self, rag_context: str) -> str:
         """Build the system prompt, optionally including RAG context."""

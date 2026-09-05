@@ -6,13 +6,22 @@ import com.flighttracking.dto.flight.FlightDto;
 import com.flighttracking.dto.flight.FlightSearchResponse;
 import com.flighttracking.dto.flight.FlightTrackingDto;
 import com.flighttracking.exception.ResourceNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Comparator;
 import java.util.List;
 
 @Service
 public class FlightService {
+
+    private static final Logger log = LoggerFactory.getLogger(FlightService.class);
 
     private final AviationStackClient client;
 
@@ -89,6 +98,16 @@ public class FlightService {
     }
 
     private FlightDto toDto(AviationStackResponse.FlightData d) {
+        String depDelay = resolveDelay(
+                d.departure() != null ? d.departure().scheduled() : null,
+                d.departure() != null ? d.departure().actual() : null,
+                d.departure() != null ? d.departure().delay() : null,
+                d.flight() != null ? d.flight().iata() : null, "departure");
+        String arrDelay = resolveDelay(
+                d.arrival() != null ? d.arrival().scheduled() : null,
+                d.arrival() != null ? d.arrival().actual() : null,
+                d.arrival() != null ? d.arrival().delay() : null,
+                d.flight() != null ? d.flight().iata() : null, "arrival");
         return new FlightDto(
                 d.flight() != null ? d.flight().number() : null,
                 d.flight() != null ? d.flight().iata() : null,
@@ -104,7 +123,7 @@ public class FlightService {
                 d.departure() != null ? d.departure().scheduled() : null,
                 d.departure() != null ? d.departure().estimated() : null,
                 d.departure() != null ? d.departure().actual() : null,
-                d.departure() != null ? d.departure().delay() : null,
+                depDelay,
                 d.arrival() != null ? d.arrival().airport() : null,
                 d.arrival() != null ? d.arrival().iata() : null,
                 d.arrival() != null ? d.arrival().icao() : null,
@@ -113,7 +132,7 @@ public class FlightService {
                 d.arrival() != null ? d.arrival().scheduled() : null,
                 d.arrival() != null ? d.arrival().estimated() : null,
                 d.arrival() != null ? d.arrival().actual() : null,
-                d.arrival() != null ? d.arrival().delay() : null,
+                arrDelay,
                 d.flightStatus(),
                 d.aircraft() != null ? d.aircraft().registration() : null,
                 d.aircraft() != null ? d.aircraft().iata() : null,
@@ -128,6 +147,16 @@ public class FlightService {
             route = d.departure().iata() + " -> " + d.arrival().iata();
         }
         AviationStackResponse.Live live = d.live();
+        String depDelay = resolveDelay(
+                d.departure() != null ? d.departure().scheduled() : null,
+                d.departure() != null ? d.departure().actual() : null,
+                d.departure() != null ? d.departure().delay() : null,
+                d.flight() != null ? d.flight().iata() : null, "departure");
+        String arrDelay = resolveDelay(
+                d.arrival() != null ? d.arrival().scheduled() : null,
+                d.arrival() != null ? d.arrival().actual() : null,
+                d.arrival() != null ? d.arrival().delay() : null,
+                d.flight() != null ? d.flight().iata() : null, "arrival");
         return new FlightTrackingDto(
                 d.flight() != null ? d.flight().number() : null,
                 d.flight() != null ? d.flight().iata() : null,
@@ -165,8 +194,8 @@ public class FlightService {
                 live != null ? live.direction() : null,
                 live != null ? live.isGround() : null,
                 live != null ? live.updated() : null,
-                d.departure() != null ? d.departure().delay() : null,
-                d.arrival() != null ? d.arrival().delay() : null
+                depDelay,
+                arrDelay
         );
     }
 
@@ -174,5 +203,84 @@ public class FlightService {
         if (value != null && !value.isBlank() && !value.matches("(?i)^[A-Z]{3}$")) {
             throw new IllegalArgumentException(field + " must be a 3-letter IATA code");
         }
+    }
+
+    /**
+     * Resolve delay canonically from timestamps, preferring computed value over provider value.
+     * Provider delay is a String minutes (e.g., "4", "45"). Computed delay is derived from
+     * scheduled vs actual if both present. If computed differs from provider by > tolerance,
+     * computed wins and a warning is logged. Preserves null when both computed==0 and provider==null
+     * to keep existing semantics for on-time flights without explicit delay.
+     */
+    private String resolveDelay(String scheduled, String actual, String providerDelay, String flightIata, String phase) {
+        if (scheduled == null || scheduled.isBlank() || actual == null || actual.isBlank()) {
+            return providerDelay;
+        }
+        Long computed = computeDelayMinutes(scheduled, actual);
+        if (computed == null) {
+            return providerDelay;
+        }
+        // Normalize provider to Long if possible
+        Long providerMinutes = null;
+        if (providerDelay != null && !providerDelay.isBlank()) {
+            try {
+                providerMinutes = Long.parseLong(providerDelay.trim());
+            } catch (NumberFormatException ignored) {
+                // provider value not numeric – trust computed
+                providerMinutes = null;
+            }
+        }
+        // If computed 0 and provider is null/blank, preserve null to keep on-time semantics (existing tests expect null)
+        if (computed == 0 && (providerDelay == null || providerDelay.isBlank())) {
+            return null;
+        }
+        if (providerMinutes == null) {
+            return String.valueOf(computed);
+        }
+        if (!providerMinutes.equals(computed)) {
+            log.warn("Delay mismatch for flight {} {}: provider={} computed={} scheduled={} actual={}",
+                    flightIata, phase, providerMinutes, computed, scheduled, actual);
+            return String.valueOf(computed);
+        }
+        return providerDelay;
+    }
+
+    private Long computeDelayMinutes(String scheduled, String actual) {
+        Instant s = parseTimestamp(scheduled);
+        Instant a = parseTimestamp(actual);
+        if (s == null || a == null) return null;
+        return Duration.between(s, a).toMinutes();
+    }
+
+    private Instant parseTimestamp(String ts) {
+        if (ts == null || ts.isBlank()) return null;
+        String normalized = ts.trim();
+        // AviationStack formats: "2026-09-01T02:00:00+0000" (no colon) or "2026-09-01T02:00:00+00:00" or ISO with Z/fraction
+        // Normalize +0000 -> +00:00
+        if (normalized.matches(".*[+-]\\d{4}$")) {
+            normalized = normalized.replaceFirst("([+-]\\d{2})(\\d{2})$", "$1:$2");
+        }
+        // Try OffsetDateTime with ISO
+        try {
+            return OffsetDateTime.parse(normalized, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant();
+        } catch (DateTimeParseException ignored) {}
+        // Try with pattern yyyy-MM-dd'T'HH:mm:ssZ
+        try {
+            DateTimeFormatter f = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssZ");
+            return OffsetDateTime.parse(normalized, f).toInstant();
+        } catch (DateTimeParseException ignored) {}
+        // Try with fraction + Z: "yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'"
+        try {
+            // Instant.parse handles "2026-09-01T02:00:00Z" and with fraction
+            if (normalized.endsWith("Z")) {
+                return Instant.parse(normalized);
+            }
+        } catch (DateTimeParseException ignored) {}
+        // Try without colon offset already handled, try generic
+        try {
+            return OffsetDateTime.parse(normalized).toInstant();
+        } catch (Exception ignored) {}
+        log.debug("Unable to parse timestamp for delay computation: {}", ts);
+        return null;
     }
 }

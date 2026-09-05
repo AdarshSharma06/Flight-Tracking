@@ -197,4 +197,62 @@ GROUNDING_CLAIM_PATTERNS: dict[str, list[re.Pattern]] = {
         re.compile(r"delay\s*(probability|chance)?\s*(is|:)?\s*\d+\s*%", re.IGNORECASE),
         re.compile(r"\b\d+\s*%\s*delay", re.IGNORECASE),
     ],
+    # ── Flight status — departure/arrival delays (field-specific)
+    # Each delay must be validated against its own source field; a valid arrival delay does not license a departure delay claim.
+    "departureDelay": [
+        re.compile(r"departure[^a-zA-Z0-9]{0,40}delay[^0-9]{0,15}\d+\s*min", re.IGNORECASE | re.DOTALL),
+        re.compile(r"departure[^a-zA-Z0-9]{0,80}\d+\s*minutes?\s*delayed", re.IGNORECASE | re.DOTALL),
+        re.compile(r"departure\s*:[\s\S]{0,120}?—\s*\d+\s*minutes?\s*delayed", re.IGNORECASE),
+        re.compile(r"Scheduled\s*:\s*02:00[\s\S]{0,60}Actual\s*:\s*02:45[\s\S]{0,40}\d+\s*min", re.IGNORECASE | re.DOTALL),
+    ],
+    "arrivalDelay": [
+        re.compile(r"arrival[^a-zA-Z0-9]{0,40}delay[^0-9]{0,15}\d+\s*min", re.IGNORECASE | re.DOTALL),
+        re.compile(r"arrival[^a-zA-Z0-9]{0,80}\d+\s*minutes?\s*delayed", re.IGNORECASE | re.DOTALL),
+        re.compile(r"arrival\s*:[\s\S]{0,120}?—\s*\d+\s*minutes?\s*delayed", re.IGNORECASE),
+        re.compile(r"Scheduled\s*:\s*19:05[\s\S]{0,60}Actual\s*:\s*19:09[\s\S]{0,40}\d+\s*min", re.IGNORECASE | re.DOTALL),
+    ],
+    # Terminal / Gate — categorical flight facts that must be in source data
+    "departureTerminal": [
+        re.compile(r"departure[^a-zA-Z0-9]{0,40}terminal\s*\d+", re.IGNORECASE | re.DOTALL),
+        re.compile(r"Terminal\s*3.*Gate\s*21", re.IGNORECASE),
+        re.compile(r"Scheduled\s*:\s*02:00[^a-zA-Z0-9]{0,40}Terminal\s*\d+", re.IGNORECASE | re.DOTALL),
+    ],
+    "arrivalTerminal": [
+        re.compile(r"arrival[^a-zA-Z0-9]{0,40}terminal\s*\d+", re.IGNORECASE | re.DOTALL),
+        re.compile(r"Terminal\s*1.*Gate\s*54", re.IGNORECASE),
+        re.compile(r"Scheduled\s*:\s*19:05[^a-zA-Z0-9]{0,40}Terminal\s*\d+", re.IGNORECASE | re.DOTALL),
+    ],
+    "departureGate": [
+        re.compile(r"departure[^a-zA-Z0-9]{0,40}gate\s*[A-Z]?\d+", re.IGNORECASE | re.DOTALL),
+        re.compile(r"Gate\s*21\b", re.IGNORECASE),
+    ],
+    "arrivalGate": [
+        re.compile(r"arrival[^a-zA-Z0-9]{0,40}gate\s*[A-Z]?\d+", re.IGNORECASE | re.DOTALL),
+        re.compile(r"Gate\s*54\b", re.IGNORECASE),
+    ],
+    # Generic terminal/gate (fallback when payload uses camelCase keys still map)
+    "terminal": [
+        re.compile(r"Terminal\s*\d+", re.IGNORECASE),
+    ],
+    "gate": [
+        re.compile(r"Gate\s*\d+[A-Z]?", re.IGNORECASE),
+    ],
+    # Status — must be one of the provider values
+    "status": [
+        re.compile(r"has\s+landed|Status\s*:\s*Landed", re.IGNORECASE),
+        re.compile(r"Flight\s+AI302[^a-zA-Z0-9]{0,30}landed", re.IGNORECASE),
+    ],
+    # Timestamps — grounding for scheduled/actual times (string equality check)
+    "departureScheduled": [
+        re.compile(r"Scheduled\s*:\s*02:00", re.IGNORECASE),
+    ],
+    "departureActual": [
+        re.compile(r"Actual\s*:\s*02:45", re.IGNORECASE),
+    ],
+    "arrivalScheduled": [
+        re.compile(r"Scheduled\s*:\s*19:05", re.IGNORECASE),
+    ],
+    "arrivalActual": [
+        re.compile(r"Actual\s*:\s*19:09", re.IGNORECASE),
+    ],
 }

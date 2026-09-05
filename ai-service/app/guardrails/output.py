@@ -188,13 +188,23 @@ class OutputGuardrails:
                         break
             else:
                 # Field has an actual numeric value — detect contradicting numeric claims
-                # Only for numeric fields (altitude, speed, heading, windSpeed, temperature, price, delay_probability)
-                numeric_fields = {"altitude", "speed", "heading", "windSpeed", "temperature", "price", "delay_probability"}
-                if field in numeric_fields and isinstance(actual_value, (int, float)):
+                # Covers flight delays and other numeric telemetry
+                numeric_fields = {"altitude", "speed", "heading", "windSpeed", "temperature", "price", "delay_probability", "departureDelay", "arrivalDelay"}
+                # Also handle delay fields that are strings like "45" / "4"
+                actual_numeric = None
+                if field in ("departureDelay", "arrivalDelay"):
+                    try:
+                        actual_numeric = float(str(actual_value).strip()) if str(actual_value).strip() not in ("", "null", "None") else None
+                    except Exception:
+                        actual_numeric = None
+                elif isinstance(actual_value, (int, float)):
+                    actual_numeric = float(actual_value)
+
+                if field in numeric_fields and actual_numeric is not None:
                     claimed_numbers = self._extract_claimed_numbers(text, field)
                     for num in claimed_numbers:
-                        # Allow small rounding tolerance; flag clear contradictions
-                        if abs(num - float(actual_value)) > max(1.0, abs(float(actual_value)) * 0.05):
+                        # Allow small rounding tolerance; flag clear contradictions (e.g., 4 vs 45)
+                        if abs(num - actual_numeric) > max(1.0, abs(actual_numeric) * 0.05):
                             violations.append(GuardrailViolation(
                                 violation_type=ViolationType.UNSUPPORTED_CLAIM,
                                 severity=ViolationSeverity.BLOCK,
@@ -209,6 +219,11 @@ class OutputGuardrails:
                                 field, actual_value, num,
                             )
                             break
+                # For categorical fields (terminal/gate/status) with an actual value, a contradicting claim is harder
+                # to auto-detect without exact string compare. At minimum, if field has a value and LLM claims a
+                # *different* value for that category, treat the pattern hit as already vetted via unavailable check.
+                # String mismatch for terminal/gate is handled via sanitization when is_unavailable was False but patterns still fire;
+                # numeric mismatch above is the primary guard for delays.
 
         return violations
 
@@ -217,7 +232,46 @@ class OutputGuardrails:
         import re as _re
 
         numbers: list[float] = []
-        # Field-anchored extraction: look for the field name near a number
+
+        # Special handling for field-specific delays: only extract numbers that are part of a delay claim
+        # e.g., "45 minutes delayed" or "delay ... 45 min" near departure/arrival
+        if field in ("departureDelay", "arrivalDelay"):
+            # Find all delay claims: "X minutes delayed" / "X-minute delay" / "delay ... X min"
+            delay_claims = []
+            for m in _re.finditer(r"(\d+)\s*minutes?\s*delayed", text, _re.IGNORECASE):
+                delay_claims.append((m.start(), m.end(), float(m.group(1).replace(",", ""))))
+            for m in _re.finditer(r"(\d+)[\s\-]*minutes?\s*delay\b", text, _re.IGNORECASE):
+                delay_claims.append((m.start(), m.end(), float(m.group(1).replace(",", ""))))
+            for m in _re.finditer(r"delay[^0-9]{0,12}(\d+)\s*min", text, _re.IGNORECASE):
+                delay_claims.append((m.start(), m.end(), float(m.group(1).replace(",", ""))))
+            # Also handle "— 4 minutes delayed" after timestamps (em dash)
+            for m in _re.finditer(r"—\s*(\d+)\s*minutes?\s*delayed", text, _re.IGNORECASE):
+                delay_claims.append((m.start(), m.end(), float(m.group(1).replace(",", ""))))
+            # Attribute each claim to departure or arrival based on nearest field keyword before the claim
+            for start, end, num in delay_claims:
+                # Look back up to 120 chars for departure/arrival indicator
+                window_start = max(0, start - 120)
+                window = text[window_start:start]
+                # Determine if this claim belongs to this field
+                has_dep = bool(_re.search(r"departure", window, _re.IGNORECASE))
+                has_arr = bool(_re.search(r"arrival", window, _re.IGNORECASE))
+                # Also handle section headers: "Departure:" vs "Arrival:" blocks
+                # If both present, pick the closer one (last occurrence)
+                if has_dep and has_arr:
+                    # Find last occurrence distance
+                    dep_pos = window.lower().rfind("departure")
+                    arr_pos = window.lower().rfind("arrival")
+                    has_dep = dep_pos > arr_pos if field == "departureDelay" else False
+                    has_arr = arr_pos > dep_pos if field == "arrivalDelay" else False
+                if field == "departureDelay" and has_dep:
+                    numbers.append(num)
+                elif field == "arrivalDelay" and has_arr:
+                    numbers.append(num)
+                # Fallback for texts where delay is described without explicit departure/arrival prefix
+                # but the earlier generic pattern "delay ... X min" is near the field – handled above via window check
+            return numbers
+
+        # Generic field-anchored extraction for other numeric fields
         field_keywords = {
             "altitude": [r"altitude", r"flying\s+at", r"at\s+\d+.*feet"],
             "speed": [r"speed"],
@@ -231,14 +285,12 @@ class OutputGuardrails:
 
         # Extract numbers that appear near field keywords
         for kw in keywords:
-            # Pattern: keyword ... number  OR  number ... keyword
             for m in _re.finditer(r"(\d[\d,]*\.?\d*)", text):
                 num_str = m.group(1).replace(",", "")
                 try:
                     num = float(num_str)
                 except ValueError:
                     continue
-                # Check proximity: is keyword within 40 chars of the number?
                 start = max(0, m.start() - 40)
                 end = min(len(text), m.end() + 40)
                 window = text[start:end]
