@@ -207,10 +207,16 @@ Return JSON with these fields (use null for unknown/missing):
   "travel_time": "HH:MM or null",
   "budget": "number or null (in the user's currency)",
   "budget_currency": "ISO 4217 code or null",
-  "direct_only": true/false,
+  "direct_only": "true, false, or null",
   "airline_preference": "airline name/code or null",
   "other_preferences": "any other stated preferences or null"
-}}"""
+}}
+
+direct_only rules:
+- Return true ONLY when the current request explicitly asks for a direct/non-stop flight.
+- Return false ONLY when the current request explicitly asks for a connecting/stopover/one-stop flight.
+- Return null when the current request does not mention whether the flight should be direct.
+The current request must be treated independently from any stored preferences."""
 
     try:
         response = await llm.complete(

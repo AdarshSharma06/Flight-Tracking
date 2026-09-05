@@ -97,6 +97,9 @@ def _coerce_user_preferences(obj) -> Optional[UserPreferences]:
         return obj
     if isinstance(obj, dict):
         try:
+            direct_only_val = obj.get("direct_only")
+            if "direct_only" not in obj:
+                direct_only_val = False
             return UserPreferences(
                 origin=obj.get("origin"),
                 destination=obj.get("destination"),
@@ -104,7 +107,7 @@ def _coerce_user_preferences(obj) -> Optional[UserPreferences]:
                 travel_time=obj.get("travel_time"),
                 budget=obj.get("budget"),
                 budget_currency=obj.get("budget_currency"),
-                direct_only=obj.get("direct_only", False) if obj.get("direct_only") is not None else False,
+                direct_only=direct_only_val,
                 airline_preference=obj.get("airline_preference"),
                 other_preferences=obj.get("other_preferences"),
             )

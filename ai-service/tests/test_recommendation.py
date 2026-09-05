@@ -1701,3 +1701,316 @@ class TestParsePreferencesIataNormalization:
         prefs = result["preferences"]
         assert prefs.origin == "DEL"
         assert prefs.destination == "BOM"
+
+
+# ===== Three-State direct_only Regression Tests (AI-6 → AI-5 Bug) =====
+
+
+class TestDirectOnlyThreeState:
+    """Regression tests for the three-state direct_only preference behavior.
+
+    direct_only must support three states:
+    - None: current request did not specify → preserve stored preference
+    - True: current request explicitly asks for direct/non-stop
+    - False: current request explicitly asks for connecting/stopover
+
+    The root cause of the production bug was that the LLM prompt only allowed
+    true/false, causing the LLM to return false when the user didn't mention
+    directness. The is-not-None merge logic then overwrote stored true with false.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_stored_true_llm_null_preserves_true(self):
+        """A. Stored true + LLM returns null → final direct_only = True."""
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            return_value=LLMResponse(
+                content='{"origin": "DEL", "destination": "BOM", "direct_only": null}'
+            )
+        )
+        state = RecommendationState(
+            user_request="Find a flight from Delhi to Mumbai",
+            preferences=UserPreferences(direct_only=True),
+            errors=[],
+            unavailable_data=[],
+        )
+        result = await parse_preferences(state, llm)
+        prefs = result["preferences"]
+        assert prefs.direct_only is True
+        assert prefs.origin == "DEL"
+        assert prefs.destination == "BOM"
+
+    @pytest.mark.asyncio
+    async def test_b_stored_true_llm_false_overrides_to_false(self):
+        """B. Stored true + LLM returns false → final direct_only = False."""
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            return_value=LLMResponse(
+                content='{"origin": "DEL", "destination": "BOM", "direct_only": false}'
+            )
+        )
+        state = RecommendationState(
+            user_request="Find a connecting flight from Delhi to Mumbai",
+            preferences=UserPreferences(direct_only=True),
+            errors=[],
+            unavailable_data=[],
+        )
+        result = await parse_preferences(state, llm)
+        prefs = result["preferences"]
+        assert prefs.direct_only is False
+
+    @pytest.mark.asyncio
+    async def test_c_stored_false_llm_true_overrides_to_true(self):
+        """C. Stored false + LLM returns true → final direct_only = True."""
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            return_value=LLMResponse(
+                content='{"origin": "DEL", "destination": "BOM", "direct_only": true}'
+            )
+        )
+        state = RecommendationState(
+            user_request="Find a non-stop flight from Delhi to Mumbai",
+            preferences=UserPreferences(direct_only=False),
+            errors=[],
+            unavailable_data=[],
+        )
+        result = await parse_preferences(state, llm)
+        prefs = result["preferences"]
+        assert prefs.direct_only is True
+
+    @pytest.mark.asyncio
+    async def test_d_stored_false_llm_null_preserves_false(self):
+        """D. Stored false + LLM returns null → final direct_only = False."""
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            return_value=LLMResponse(
+                content='{"origin": "DEL", "destination": "BOM", "direct_only": null}'
+            )
+        )
+        state = RecommendationState(
+            user_request="Find a flight from Delhi to Mumbai",
+            preferences=UserPreferences(direct_only=False),
+            errors=[],
+            unavailable_data=[],
+        )
+        result = await parse_preferences(state, llm)
+        prefs = result["preferences"]
+        assert prefs.direct_only is False
+
+    @pytest.mark.asyncio
+    async def test_e_no_stored_llm_null_defaults_to_false(self):
+        """E. No stored preference + LLM returns null → final direct_only = False (default/neutral).
+
+        UserPreferences.direct_only is bool (not Optional[bool]), so it defaults to False.
+        False is treated as neutral (0.5) by _score_direct_preference — no preference specified.
+        The three-state behavior happens at the merge level: null means "don't override existing".
+        """
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            return_value=LLMResponse(
+                content='{"origin": "DEL", "destination": "BOM", "direct_only": null}'
+            )
+        )
+        state = RecommendationState(
+            user_request="Find a flight from Delhi to Mumbai",
+            preferences=UserPreferences(),
+            errors=[],
+            unavailable_data=[],
+        )
+        result = await parse_preferences(state, llm)
+        prefs = result["preferences"]
+        assert prefs.direct_only is False
+
+    @pytest.mark.asyncio
+    async def test_f_production_regression_direct_only_preserved(self):
+        """F. Production regression: stored direct_only=true preserved when LLM returns null."""
+        from app.agents.recommendation_agent import compile_recommendation_graph
+
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            side_effect=[
+                LLMResponse(
+                    content='{"origin": "DEL", "destination": "BOM", "airline_preference": "AI", "travel_time": "evening", "direct_only": null}',
+                    model="test",
+                ),
+                LLMResponse(content="Recommended.", model="test"),
+            ]
+        )
+        compiled = compile_recommendation_graph(llm)
+
+        search_result = ToolResult(
+            success=True,
+            data={
+                "flights": [
+                    {
+                        "flight_iata": "AI302",
+                        "dep_iata": "DEL",
+                        "arr_iata": "BOM",
+                        "departure_time": "2025-01-15T18:00",
+                        "status": "scheduled",
+                    }
+                ]
+            },
+        )
+        status_result = ToolResult(success=True, data={"status": "scheduled"})
+        weather_result = ToolResult(success=True, data={"temperature": 25.0, "weatherCondition": "Clear"})
+
+        async def mock_execute(name, args):
+            if name == "search_flights":
+                return search_result
+            elif name == "get_flight_status":
+                return status_result
+            elif name == "get_weather":
+                return weather_result
+            return ToolResult(success=False, error="unknown")
+
+        with patch("app.agents.nodes.registry") as mock_reg:
+            mock_reg.execute = AsyncMock(side_effect=mock_execute)
+
+            stored_prefs = UserPreferences(
+                direct_only=True,
+                airline_preference="AI",
+                travel_time="evening",
+            )
+            initial = RecommendationState(
+                user_request="Find me a flight from Delhi to Mumbai.",
+                preferences=stored_prefs,
+            )
+            final = await compiled.ainvoke(initial)
+
+            assert isinstance(final, dict)
+            prefs = final.get("preferences")
+            assert isinstance(prefs, UserPreferences)
+            assert prefs.direct_only is True, "Stored direct_only=true must be preserved"
+            assert prefs.airline_preference == "AI"
+            assert prefs.travel_time == "evening"
+            assert prefs.origin == "DEL"
+            assert prefs.destination == "BOM"
+
+    @pytest.mark.asyncio
+    async def test_g_explicit_override_stored_true_to_false(self):
+        """G. Explicit override: stored true + 'connecting flight' → direct_only=false."""
+        from app.agents.recommendation_agent import compile_recommendation_graph
+
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            side_effect=[
+                LLMResponse(
+                    content='{"origin": "DEL", "destination": "BOM", "direct_only": false}',
+                    model="test",
+                ),
+                LLMResponse(content="Recommended.", model="test"),
+            ]
+        )
+        compiled = compile_recommendation_graph(llm)
+
+        search_result = ToolResult(
+            success=True,
+            data={
+                "flights": [
+                    {
+                        "flight_iata": "AI302",
+                        "dep_iata": "DEL",
+                        "arr_iata": "BOM",
+                        "departure_time": "2025-01-15T10:00",
+                        "status": "scheduled",
+                    }
+                ]
+            },
+        )
+        status_result = ToolResult(success=True, data={"status": "scheduled"})
+        weather_result = ToolResult(success=True, data={"temperature": 25.0, "weatherCondition": "Clear"})
+
+        async def mock_execute(name, args):
+            if name == "search_flights":
+                return search_result
+            elif name == "get_flight_status":
+                return status_result
+            elif name == "get_weather":
+                return weather_result
+            return ToolResult(success=False, error="unknown")
+
+        with patch("app.agents.nodes.registry") as mock_reg:
+            mock_reg.execute = AsyncMock(side_effect=mock_execute)
+
+            stored_prefs = UserPreferences(direct_only=True)
+            initial = RecommendationState(
+                user_request="Find me a connecting flight from Delhi to Mumbai.",
+                preferences=stored_prefs,
+            )
+            final = await compiled.ainvoke(initial)
+
+            assert isinstance(final, dict)
+            prefs = final.get("preferences")
+            assert isinstance(prefs, UserPreferences)
+            assert prefs.direct_only is False, "Explicit false must override stored true"
+
+    @pytest.mark.asyncio
+    async def test_h_ignore_saved_preferences_direct_neutral(self):
+        """H. Ignore saved preferences: stored prefs not loaded, direct_only stays neutral."""
+        from app.agents.recommendation_agent import compile_recommendation_graph
+
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            side_effect=[
+                LLMResponse(
+                    content='{"origin": "DEL", "destination": "BOM", "direct_only": null}',
+                    model="test",
+                ),
+                LLMResponse(content="Recommended.", model="test"),
+            ]
+        )
+        compiled = compile_recommendation_graph(llm)
+
+        search_result = ToolResult(
+            success=True,
+            data={
+                "flights": [
+                    {
+                        "flight_iata": "AI302",
+                        "dep_iata": "DEL",
+                        "arr_iata": "BOM",
+                        "departure_time": "2025-01-15T10:00",
+                        "status": "scheduled",
+                    }
+                ]
+            },
+        )
+        status_result = ToolResult(success=True, data={"status": "scheduled"})
+        weather_result = ToolResult(success=True, data={"temperature": 25.0, "weatherCondition": "Clear"})
+
+        async def mock_execute(name, args):
+            if name == "search_flights":
+                return search_result
+            elif name == "get_flight_status":
+                return status_result
+            elif name == "get_weather":
+                return weather_result
+            return ToolResult(success=False, error="unknown")
+
+        with patch("app.agents.nodes.registry") as mock_reg:
+            mock_reg.execute = AsyncMock(side_effect=mock_execute)
+
+            # When ignore is detected, endpoint passes no stored prefs (initial_preferences=None)
+            # parse_preferences receives empty UserPreferences as initial
+            initial = RecommendationState(
+                user_request="Find me any flight from Delhi to Mumbai. Ignore my saved flight preferences for this request.",
+                preferences=UserPreferences(),
+            )
+            final = await compiled.ainvoke(initial)
+
+            assert isinstance(final, dict)
+            prefs = final.get("preferences")
+            assert isinstance(prefs, UserPreferences)
+            # No stored prefs loaded, LLM returned null → direct_only defaults to False (neutral)
+            assert prefs.direct_only is False
+            assert prefs.airline_preference is None
+            assert prefs.travel_time is None
