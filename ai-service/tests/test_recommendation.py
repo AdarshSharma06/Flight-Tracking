@@ -1514,3 +1514,190 @@ class TestCoercionThroughGraph:
             mock_reg.execute = AsyncMock(return_value=ToolResult(success=True, data={"temperature": 25}))
             result = await get_weather(state_dict)
             assert "weather_data" in result
+
+
+# ===== IATA Normalization Tests =====
+
+
+class TestIataNormalization:
+    """Test normalize_iata converts city names to IATA codes."""
+
+    def test_already_iata_code(self):
+        from app.agents.nodes import normalize_iata
+        assert normalize_iata("DEL") == "DEL"
+        assert normalize_iata("bom") == "BOM"
+
+    def test_city_to_iata(self):
+        from app.agents.nodes import normalize_iata
+        assert normalize_iata("Delhi") == "DEL"
+        assert normalize_iata("mumbai") == "BOM"
+        assert normalize_iata("Bangalore") == "BLR"
+        assert normalize_iata("bengaluru") == "BLR"
+        assert normalize_iata("Chennai") == "MAA"
+        assert normalize_iata("Kolkata") == "CCU"
+        assert normalize_iata("Hyderabad") == "HYD"
+        assert normalize_iata("goa") == "GOI"
+        assert normalize_iata("Pune") == "PNQ"
+
+    def test_international_cities(self):
+        from app.agents.nodes import normalize_iata
+        assert normalize_iata("London") == "LHR"
+        assert normalize_iata("new york") == "JFK"
+        assert normalize_iata("Dubai") == "DXB"
+        assert normalize_iata("Singapore") == "SIN"
+
+    def test_none_and_empty(self):
+        from app.agents.nodes import normalize_iata
+        assert normalize_iata(None) is None
+        assert normalize_iata("") is None
+        assert normalize_iata("  ") is None
+
+    def test_unknown_city_returns_none(self):
+        from app.agents.nodes import normalize_iata
+        assert normalize_iata("Springfield") is None
+        assert normalize_iata("Atlantis") is None
+
+
+# ===== CamelCase Field Mapping Tests =====
+
+
+class TestCamelCaseFieldMapping:
+    """Test that search_flights correctly maps Spring Boot camelCase keys."""
+
+    @pytest.mark.asyncio
+    async def test_search_flights_maps_camelcase_keys(self):
+        """search_flights extracts IATA codes from camelCase keys."""
+        from app.agents.state import FlightCandidate
+
+        camelcase_flight = {
+            "flightIata": "6E322",
+            "departureIata": "DEL",
+            "arrivalIata": "BOM",
+            "departureScheduled": "2026-09-05T10:30:00+0530",
+            "arrivalScheduled": "2026-09-05T12:45:00+0530",
+            "airlineIata": "6E",
+            "status": "scheduled",
+            "aircraftIata": "A20N",
+        }
+
+        state = RecommendationState(
+            user_request="test",
+            preferences=UserPreferences(origin="DEL", destination="BOM"),
+            errors=[],
+            unavailable_data=[],
+        )
+
+        with patch("app.agents.nodes.registry") as mock_reg:
+            mock_reg.execute = AsyncMock(
+                return_value=ToolResult(success=True, data={"flights": [camelcase_flight]})
+            )
+            result = await search_flights(state)
+
+        candidates = result["candidate_flights"]
+        assert len(candidates) == 1
+        c = candidates[0]
+        assert c.flight_number == "6E322"
+        assert c.origin == "DEL"
+        assert c.destination == "BOM"
+        assert c.departure_time == "2026-09-05T10:30:00+0530"
+        assert c.arrival_time == "2026-09-05T12:45:00+0530"
+        assert c.airline == "6E"
+        assert c.status == "scheduled"
+        assert c.aircraft == "A20N"
+
+    @pytest.mark.asyncio
+    async def test_search_flights_snake_case_still_works(self):
+        """search_flights still handles snake_case keys (backward compat)."""
+        snake_flight = {
+            "flight_iata": "AI302",
+            "dep_iata": "DEL",
+            "arr_iata": "BOM",
+            "departure_time": "2026-09-05T08:00:00+0530",
+            "arrival_time": "2026-09-05T10:15:00+0530",
+            "airline_iata": "AI",
+            "flight_status": "active",
+            "aircraft": "B787",
+        }
+
+        state = RecommendationState(
+            user_request="test",
+            preferences=UserPreferences(origin="DEL", destination="BOM"),
+            errors=[],
+            unavailable_data=[],
+        )
+
+        with patch("app.agents.nodes.registry") as mock_reg:
+            mock_reg.execute = AsyncMock(
+                return_value=ToolResult(success=True, data={"flights": [snake_flight]})
+            )
+            result = await search_flights(state)
+
+        candidates = result["candidate_flights"]
+        assert len(candidates) == 1
+        c = candidates[0]
+        assert c.flight_number == "AI302"
+        assert c.origin == "DEL"
+        assert c.destination == "BOM"
+        assert c.departure_time == "2026-09-05T08:00:00+0530"
+
+    @pytest.mark.asyncio
+    async def test_infer_direct_uses_iata_keys(self):
+        """_infer_direct uses departureIata/arrivalIata for comparison."""
+        from app.agents.nodes import _infer_direct
+
+        flight = {"departureIata": "DEL", "arrivalIata": "DEL"}
+        assert _infer_direct(flight) is False
+
+        flight2 = {"departureIata": "DEL", "arrivalIata": "BOM"}
+        assert _infer_direct(flight2) is None
+
+
+# ===== parse_preferences + normalize_iata Integration Tests =====
+
+
+class TestParsePreferencesIataNormalization:
+    """Test that parse_preferences normalizes city names to IATA codes."""
+
+    @pytest.mark.asyncio
+    async def test_parse_preferences_normalizes_city_names(self):
+        """LLM returning city names gets normalized to IATA codes."""
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            return_value=LLMResponse(
+                content='{"origin": "Delhi", "destination": "Mumbai", "direct_only": false}'
+            )
+        )
+
+        state = RecommendationState(
+            user_request="Find me a flight from Delhi to Mumbai",
+            errors=[],
+            unavailable_data=[],
+        )
+
+        result = await parse_preferences(state, llm)
+        prefs = result["preferences"]
+        assert prefs.origin == "DEL"
+        assert prefs.destination == "BOM"
+
+    @pytest.mark.asyncio
+    async def test_parse_preferences_iata_passthrough(self):
+        """LLM returning correct IATA codes passes through unchanged."""
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            return_value=LLMResponse(
+                content='{"origin": "DEL", "destination": "BOM", "direct_only": true}'
+            )
+        )
+
+        state = RecommendationState(
+            user_request="Direct flight Delhi to Mumbai",
+            errors=[],
+            unavailable_data=[],
+        )
+
+        result = await parse_preferences(state, llm)
+        prefs = result["preferences"]
+        assert prefs.origin == "DEL"
+        assert prefs.destination == "BOM"

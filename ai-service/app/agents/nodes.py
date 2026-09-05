@@ -57,6 +57,105 @@ def _record_agent_step(step_name: str, duration_ms: float, success: bool, status
 
 MAX_SEARCH_RESULTS = 20
 
+# ── IATA normalization ──────────────────────────────────────────
+# LLMs sometimes return city/airport names instead of IATA codes.
+# Spring Boot rejects non-3-letter values via validateIataIfPresent.
+# This mapping converts common city names to their IATA codes.
+
+_CITY_TO_IATA: dict[str, str] = {
+    # India
+    "delhi": "DEL",
+    "mumbai": "BOM",
+    "bangalore": "BLR",
+    "bengaluru": "BLR",
+    "chennai": "MAA",
+    "kolkata": "CCU",
+    "hyderabad": "HYD",
+    "pune": "PNQ",
+    "ahmedabad": "AMD",
+    "goa": "GOI",
+    "jaipur": "JAI",
+    "lucknow": "LKO",
+    "chandigarh": "IXC",
+    "bhopal": "BHO",
+    "indore": "IDR",
+    "nagpur": "NAG",
+    "patna": "PAT",
+    "guwahati": "GAU",
+    "cochin": "COK",
+    "kochi": "COK",
+    "trivandrum": "TRV",
+    "thiruvananthapuram": "TRV",
+    "calicut": "CCJ",
+    "kozhikode": "CCJ",
+    "visakhapatnam": "VTZ",
+    "vijayawada": "VGA",
+    "tiruchirappalli": "TRZ",
+    "madurai": "IXM",
+    "coimbatore": "CJB",
+    "dehradun": "DED",
+    "varanasi": "VNS",
+    "amritsar": "ATQ",
+    "ranchi": "IXR",
+    "hubli": "HBX",
+    "mangalore": "IXE",
+    "jammu": "IXJ",
+    "srinagar": "SXR",
+    "leh": "IXL",
+    "puducherry": "PNY",
+    # International
+    "new york": "JFK",
+    "los angeles": "LAX",
+    "london": "LHR",
+    "paris": "CDG",
+    "tokyo": "NRT",
+    "dubai": "DXB",
+    "singapore": "SIN",
+    "bangkok": "BKK",
+    "hong kong": "HKG",
+    "shanghai": "PVG",
+    "beijing": "PEK",
+    "frankfurt": "FRA",
+    "amsterdam": "AMS",
+    "istanbul": "IST",
+    "kathmandu": "KTM",
+    "colombo": "CMB",
+    "dhaka": "DAC",
+    "hanoi": "HAN",
+    "ho chi minh": "SGN",
+    "kuala lumpur": "KUL",
+    "osaka": "KIX",
+    "seoul": "ICN",
+    "sydney": "SYD",
+    "melbourne": "MEL",
+    "toronto": "YYZ",
+    "san francisco": "SFO",
+    "chicago": "ORD",
+    "washington": "IAD",
+    "doha": "DOH",
+    "abu dhabi": "AUH",
+    "riyadh": "RUH",
+    "jeddah": "JED",
+}
+
+
+def normalize_iata(value: str | None) -> str | None:
+    """Normalize a value to a 3-letter IATA code.
+
+    Accepts IATA codes (returned as-is) or common city/airport names
+    (mapped to IATA). Returns None if value is None/empty or cannot
+    be resolved.
+    """
+    if not value or not value.strip():
+        return None
+    v = value.strip()
+    key = v.lower()
+    if key in _CITY_TO_IATA:
+        return _CITY_TO_IATA[key]
+    if len(v) == 3 and v.isalpha():
+        return v.upper()
+    return None
+
 
 def _extract_json_from_llm(text: str) -> dict:
     """Extract a JSON object from LLM text that may contain markdown fences."""
@@ -122,8 +221,8 @@ Return JSON with these fields (use null for unknown/missing):
 
         # LLM-extracted values override only non-null fields
         preferences = UserPreferences(
-            origin=parsed.get("origin") or existing.origin,
-            destination=parsed.get("destination") or existing.destination,
+            origin=normalize_iata(parsed.get("origin") or existing.origin),
+            destination=normalize_iata(parsed.get("destination") or existing.destination),
             travel_date=parsed.get("travel_date") or existing.travel_date,
             travel_time=parsed.get("travel_time") or existing.travel_time,
             budget=parsed.get("budget") or existing.budget,
@@ -183,14 +282,14 @@ async def search_flights(state: RecommendationState) -> dict:
     for f in flights_raw:
         candidates.append(
             FlightCandidate(
-                flight_number=f.get("flight_iata", f.get("flightNumber", f.get("flight_number", "unknown"))),
-                origin=f.get("dep_iata", f.get("departureAirport", f.get("origin"))),
-                destination=f.get("arr_iata", f.get("arrivalAirport", f.get("destination"))),
-                departure_time=f.get("departure_time", f.get("scheduled departure", f.get("departureTime"))),
-                arrival_time=f.get("arrival_time", f.get("scheduled arrival", f.get("arrivalTime"))),
-                airline=f.get("airline_iata", f.get("airline", f.get("airlineName"))),
+                flight_number=f.get("flight_iata", f.get("flightIata", f.get("flightNumber", f.get("flight_number", "unknown")))),
+                origin=f.get("dep_iata", f.get("departureIata", "")),
+                destination=f.get("arr_iata", f.get("arrivalIata", "")),
+                departure_time=f.get("departure_time", f.get("departureScheduled", f.get("scheduled departure", f.get("departureTime")))),
+                arrival_time=f.get("arrival_time", f.get("arrivalScheduled", f.get("scheduled arrival", f.get("arrivalTime")))),
+                airline=f.get("airline_iata", f.get("airlineIata", f.get("airline", f.get("airlineName")))),
                 status=f.get("flight_status", f.get("status")),
-                aircraft=f.get("aircraft", f.get("aircraftType")),
+                aircraft=f.get("aircraft", f.get("aircraftIata", f.get("aircraftType"))),
                 price=f.get("price"),
                 is_direct=_infer_direct(f),
                 raw_data=f,
@@ -208,8 +307,8 @@ def _infer_direct(flight_data: dict) -> Optional[bool]:
     if stops is not None:
         return int(stops) == 0
 
-    dep = flight_data.get("dep_iata", flight_data.get("departureAirport", ""))
-    arr = flight_data.get("arr_iata", flight_data.get("arrivalAirport", ""))
+    dep = flight_data.get("dep_iata", flight_data.get("departureIata", ""))
+    arr = flight_data.get("arr_iata", flight_data.get("arrivalIata", ""))
     if dep and arr and dep == arr:
         return False
 
@@ -240,9 +339,9 @@ async def enrich_flights(state: RecommendationState) -> dict:
                     if not candidate.status:
                         candidate.status = data.get("status", data.get("flight_status"))
                     if not candidate.aircraft:
-                        candidate.aircraft = data.get("aircraft", data.get("aircraftType"))
+                        candidate.aircraft = data.get("aircraftIata", data.get("aircraft", data.get("aircraftType")))
                     if not candidate.airline:
-                        candidate.airline = data.get("airline", data.get("airlineName"))
+                        candidate.airline = data.get("airlineIata", data.get("airline", data.get("airlineName")))
             except Exception as e:
                 logger.debug("Could not enrich flight %s: %s", candidate.flight_number, e)
 
