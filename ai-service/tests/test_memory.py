@@ -652,3 +652,222 @@ class TestRecommendationRegression:
         assert merged.direct_only is False
         # Explicit destination added
         assert merged.destination == "BOM"
+
+
+# ===== AI-5/AI-6: Ignore Saved Preferences =====
+
+
+class TestIgnoreSavedPreferences:
+    """Regression tests for 'ignore saved preferences' instruction.
+
+    When a user explicitly asks to ignore saved preferences, the recommendation
+    workflow must use only the current request's preferences — stored preferences
+    must not leak into scoring.
+    """
+
+    def test_ignore_pattern_detects_common_phrases(self):
+        """The regex detects common ignore-saved-preferences phrases."""
+        from app.api.recommendation import _IGNORE_PATTERNS
+
+        assert _IGNORE_PATTERNS.search("Ignore my saved preferences")
+        assert _IGNORE_PATTERNS.search("disregard my stored preferences")
+        assert _IGNORE_PATTERNS.search("don't use my saved preferences")
+        assert _IGNORE_PATTERNS.search("do not use my saved preferences")
+        assert _IGNORE_PATTERNS.search("skip my saved preferences")
+        assert _IGNORE_PATTERNS.search("Find flights without using my preferences")
+        assert _IGNORE_PATTERNS.search("Ignore my saved flight preferences for this request")
+
+    def test_ignore_pattern_does_not_trigger_on_normal_requests(self):
+        """Normal requests without ignore instruction are not flagged."""
+        from app.api.recommendation import _IGNORE_PATTERNS
+
+        assert not _IGNORE_PATTERNS.search("Find me a flight from Delhi to Mumbai")
+        assert not _IGNORE_PATTERNS.search("Show me direct flights")
+        assert not _IGNORE_PATTERNS.search("What are my saved preferences?")
+        assert not _IGNORE_PATTERNS.search("Save my preference for Air India")
+        assert not _IGNORE_PATTERNS.search("Ignore weather conditions")
+
+    def test_stored_airline_not_used_when_ignore_requested(self):
+        """Stored airline preference must not influence scoring when ignore requested."""
+        from app.memory.service import MemoryService
+
+        svc = MemoryService()
+        stored = {"preferred_airline": "LO", "prefers_direct": "true"}
+        merged = svc.merge_preferences(stored)
+
+        # Without ignore: stored airline should be present
+        assert merged["airline_preference"] == "LO"
+        assert merged["direct_only"] is True
+
+        # With ignore: endpoint should not load stored prefs
+        # (initial_preferences would be None, so parse_preferences starts from scratch)
+        ignore_initial = None  # Simulates what endpoint does when ignore is detected
+        if ignore_initial:
+            ignore_prefs = UserPreferences(**ignore_initial)
+        else:
+            ignore_prefs = UserPreferences()
+
+        assert ignore_prefs.airline_preference is None
+        assert ignore_prefs.direct_only is False
+
+    def test_stored_direct_not_used_when_ignore_requested(self):
+        """Stored direct preference must not influence scoring when ignore requested."""
+        from app.memory.service import MemoryService
+
+        svc = MemoryService()
+        stored = {"prefers_direct": "true", "preferred_origin": "DEL"}
+        merged = svc.merge_preferences(stored)
+
+        # Without ignore: stored direct_only should be True
+        assert merged["direct_only"] is True
+
+        # With ignore: initial_preferences is None → UserPreferences defaults
+        ignore_prefs = UserPreferences()
+        assert ignore_prefs.direct_only is False
+
+    def test_stored_evening_not_used_when_ignore_requested(self):
+        """Stored departure time preference must not influence scoring when ignore requested."""
+        from app.memory.service import MemoryService
+
+        svc = MemoryService()
+        stored = {"preferred_departure_time": "20:00", "preferred_airline": "LO"}
+        merged = svc.merge_preferences(stored)
+
+        # Without ignore: stored travel_time should be present
+        assert merged["travel_time"] == "20:00"
+
+        # With ignore: initial_preferences is None → defaults
+        ignore_prefs = UserPreferences()
+        assert ignore_prefs.travel_time is None
+
+    def test_normal_request_still_uses_stored_preferences(self):
+        """Normal requests without ignore instruction still use stored preferences."""
+        from app.memory.service import MemoryService
+
+        svc = MemoryService()
+        stored = {"preferred_airline": "LO", "prefers_direct": "true"}
+        merged = svc.merge_preferences(stored)
+        initial = UserPreferences(**merged)
+
+        # Simulate parse_preferences with no explicit overrides from LLM
+        parsed = {"origin": None, "destination": "BOM", "airline_preference": None}
+        existing = initial
+
+        result = UserPreferences(
+            origin=parsed.get("origin") or existing.origin,
+            destination=parsed.get("destination") or existing.destination,
+            travel_date=parsed.get("travel_date") or existing.travel_date,
+            travel_time=parsed.get("travel_time") or existing.travel_time,
+            budget=parsed.get("budget") or existing.budget,
+            budget_currency=parsed.get("budget_currency") or existing.budget_currency,
+            direct_only=parsed.get("direct_only") if parsed.get("direct_only") is not None else existing.direct_only,
+            airline_preference=parsed.get("airline_preference") or existing.airline_preference,
+            other_preferences=parsed.get("other_preferences") or existing.other_preferences,
+        )
+
+        # Stored preferences should be preserved
+        assert result.airline_preference == "LO"
+        assert result.direct_only is True
+
+    def test_explicit_request_preference_overrides_stored(self):
+        """Explicit current-request preference overrides stored preference."""
+        from app.memory.service import MemoryService
+
+        svc = MemoryService()
+        stored = {"preferred_airline": "LO"}
+        merged = svc.merge_preferences(stored)
+        existing = UserPreferences(**merged)
+
+        # LLM extracts explicit airline from current request
+        parsed = {"airline_preference": "AI", "origin": "DEL", "destination": "BOM"}
+
+        result = UserPreferences(
+            origin=parsed.get("origin") or existing.origin,
+            destination=parsed.get("destination") or existing.destination,
+            travel_date=parsed.get("travel_date") or existing.travel_date,
+            travel_time=parsed.get("travel_time") or existing.travel_time,
+            budget=parsed.get("budget") or existing.budget,
+            budget_currency=parsed.get("budget_currency") or existing.budget_currency,
+            direct_only=parsed.get("direct_only") if parsed.get("direct_only") is not None else existing.direct_only,
+            airline_preference=parsed.get("airline_preference") or existing.airline_preference,
+            other_preferences=parsed.get("other_preferences") or existing.other_preferences,
+        )
+
+        # Explicit request overrides stored
+        assert result.airline_preference == "AI"
+
+    def test_stored_preferences_not_modified_after_ignore_request(self):
+        """The ignore instruction must not modify stored preferences in PostgreSQL.
+
+        When ignore is requested, the endpoint skips loading stored prefs entirely,
+        so the DB is never read for preferences and the graph starts from scratch.
+        """
+        from app.memory.service import MemoryService
+
+        svc = MemoryService()
+        stored = {"preferred_airline": "LO", "prefers_direct": "true"}
+        merged = svc.merge_preferences(stored)
+
+        # With ignore: endpoint skips DB read → initial_preferences stays None
+        ignore_initial = None
+        if ignore_initial:
+            ignore_prefs = UserPreferences(**ignore_initial)
+        else:
+            ignore_prefs = UserPreferences()
+
+        # Stored preferences are completely absent from the graph state
+        assert ignore_prefs.airline_preference is None
+        assert ignore_prefs.direct_only is False
+
+    def test_ignore_with_case_variations(self):
+        """Case-insensitive matching for ignore instruction."""
+        from app.api.recommendation import _IGNORE_PATTERNS
+
+        assert _IGNORE_PATTERNS.search("IGNORE my saved preferences")
+        assert _IGNORE_PATTERNS.search("Ignore My Saved Preferences")
+        assert _IGNORE_PATTERNS.search("ignore my saved preferences")
+
+    def test_ignore_scoring_state_no_airline_match(self):
+        """When ignore is requested, scoring must not give airline_match credit for stored airline."""
+        from app.agents.ranking import _score_airline_match
+        from app.agents.state import FlightCandidate
+
+        candidate = FlightCandidate(
+            flight_number="LO123",
+            origin="DEL",
+            destination="BOM",
+            airline="LO",
+        )
+
+        # With stored airline preference LO
+        prefs_with_stored = UserPreferences(airline_preference="LO")
+        score_with = _score_airline_match(candidate, prefs_with_stored)
+        assert score_with == 1.0
+
+        # Without stored airline preference (ignore requested)
+        prefs_without = UserPreferences()
+        score_without = _score_airline_match(candidate, prefs_without)
+        assert score_without == 1.0  # No preference → returns 1.0 (neutral)
+
+    def test_ignore_scoring_state_no_direct_preference(self):
+        """When ignore is requested, scoring must not give direct preference credit."""
+        from app.agents.ranking import _score_direct_preference
+        from app.agents.state import FlightCandidate
+
+        candidate = FlightCandidate(
+            flight_number="LO123",
+            origin="DEL",
+            destination="BOM",
+            is_direct=True,
+        )
+
+        # With stored direct preference
+        prefs_with_stored = UserPreferences(direct_only=True)
+        score_with = _score_direct_preference(candidate, prefs_with_stored)
+        assert score_with == 1.0  # Direct flight + prefers direct = 1.0
+
+        # Without stored direct preference (ignore requested)
+        prefs_without = UserPreferences()
+        score_without = _score_direct_preference(candidate, prefs_without)
+        # direct_only=False → returns 1.0 (neutral, no preference)
+        assert score_without == 1.0

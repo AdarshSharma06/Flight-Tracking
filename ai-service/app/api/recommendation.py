@@ -1,6 +1,7 @@
 """Recommendation endpoint — AI-5 flight recommendation API with AI-6 memory."""
 
 import logging
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Request
@@ -17,6 +18,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["recommendation"])
 
 _llm_client = None
+
+# ── Ignore-saved-preferences detection ──────────────────────────────
+_IGNORE_PATTERNS = re.compile(
+    r"\b(?:ignore|disregard|skip|don'?t\s+use|do\s+not\s+use|without\s+using)"
+    r"\b.*\b(?:my\s+)?(?:saved|stored|preference[s]?|settings?)\b",
+    re.IGNORECASE,
+)
 
 
 def _get_llm_client():
@@ -140,15 +148,17 @@ async def recommend(request: RecommendationRequest, http_request: Request):
 
     llm_client = _get_llm_client()
 
-    # Load stored preferences and inject into initial state
+    # ── LOAD STORED PREFERENCES (unless user asks to ignore them) ──
     stored_prefs = {}
-    if user_id:
+    ignore_saved = bool(_IGNORE_PATTERNS.search(request.query))
+
+    if user_id and not ignore_saved:
         try:
             stored_prefs = await memory_service.get_preferences(user_id)
         except Exception as e:
             logger.debug("Could not load stored preferences: %s", e)
 
-    # Build initial preferences from stored data
+    # Build initial preferences from stored data (empty if ignore requested)
     initial_preferences = None
     if stored_prefs:
         merged = memory_service.merge_preferences(stored_prefs)
