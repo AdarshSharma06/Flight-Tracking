@@ -87,3 +87,54 @@ class RecommendationState:
     errors: list = field(default_factory=list)
     unavailable_data: list = field(default_factory=list)
     price_data_available: bool = False
+
+
+def _coerce_user_preferences(obj) -> Optional[UserPreferences]:
+    """Coerce a plain dict (from LangGraph asdict) back to UserPreferences."""
+    if obj is None:
+        return None
+    if isinstance(obj, UserPreferences):
+        return obj
+    if isinstance(obj, dict):
+        try:
+            return UserPreferences(
+                origin=obj.get("origin"),
+                destination=obj.get("destination"),
+                travel_date=obj.get("travel_date"),
+                travel_time=obj.get("travel_time"),
+                budget=obj.get("budget"),
+                budget_currency=obj.get("budget_currency"),
+                direct_only=obj.get("direct_only", False) if obj.get("direct_only") is not None else False,
+                airline_preference=obj.get("airline_preference"),
+                other_preferences=obj.get("other_preferences"),
+            )
+        except Exception:
+            try:
+                return UserPreferences(**obj)
+            except Exception:
+                return None
+    return None
+
+
+def coerce_recommendation_state(state) -> RecommendationState:
+    """Normalize LangGraph state (dict or dataclass) to typed RecommendationState."""
+    if isinstance(state, RecommendationState):
+        if isinstance(state.preferences, dict):
+            state.preferences = _coerce_user_preferences(state.preferences)
+        return state
+    if isinstance(state, dict):
+        prefs = _coerce_user_preferences(state.get("preferences"))
+        return RecommendationState(
+            user_request=state.get("user_request", ""),
+            preferences=prefs,
+            candidate_flights=state.get("candidate_flights", []),
+            weather_data=state.get("weather_data", {}),
+            prediction_data=state.get("prediction_data", {}),
+            scored_flights=state.get("scored_flights", []),
+            ranked_flights=state.get("ranked_flights", []),
+            recommendation=state.get("recommendation"),
+            errors=state.get("errors", []),
+            unavailable_data=state.get("unavailable_data", []),
+            price_data_available=state.get("price_data_available", False),
+        )
+    return RecommendationState()

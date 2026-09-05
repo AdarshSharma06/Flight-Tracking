@@ -28,52 +28,59 @@ from app.agents.nodes import (
     score_flights,
     search_flights,
 )
-from app.agents.state import RecommendationState
+from app.agents.state import RecommendationState, coerce_recommendation_state
 from app.llm.base import LLMClient
 
 logger = logging.getLogger(__name__)
 
 
-def _route_after_parse(state: RecommendationState) -> str:
+def _route_after_parse(state) -> str:
     """Route based on whether preferences were parsed successfully."""
-    if state.errors and not state.preferences:
+    s = coerce_recommendation_state(state)
+    if s.errors and not s.preferences:
         return "end_no_preferences"
-    if not state.preferences or (
-        not state.preferences.origin and not state.preferences.destination
+    if not s.preferences or (
+        not s.preferences.origin and not s.preferences.destination
     ):
         return "end_no_preferences"
     return "search_flights"
 
 
-def _route_after_search(state: RecommendationState) -> str:
+def _route_after_search(state) -> str:
     """Route based on whether flights were found."""
-    if not state.candidate_flights:
+    s = coerce_recommendation_state(state)
+    if not s.candidate_flights:
         return "generate_recommendation"
     return "enrich_flights"
 
 
-def _route_after_enrich(state: RecommendationState) -> str:
+def _route_after_enrich(state) -> str:
     """Always proceed to weather after enrichment."""
+    coerce_recommendation_state(state)
     return "get_weather"
 
 
-def _route_after_weather(state: RecommendationState) -> str:
+def _route_after_weather(state) -> str:
     """Always proceed to predictions after weather."""
+    coerce_recommendation_state(state)
     return "get_predictions"
 
 
-def _route_after_predictions(state: RecommendationState) -> str:
+def _route_after_predictions(state) -> str:
     """Always proceed to scoring after predictions."""
+    coerce_recommendation_state(state)
     return "score_flights"
 
 
-def _route_after_score(state: RecommendationState) -> str:
+def _route_after_score(state) -> str:
     """Always proceed to ranking after scoring."""
+    coerce_recommendation_state(state)
     return "rank_flights"
 
 
-def _route_after_rank(state: RecommendationState) -> str:
+def _route_after_rank(state) -> str:
     """Always proceed to recommendation generation after ranking."""
+    coerce_recommendation_state(state)
     return "generate_recommendation"
 
 
@@ -223,10 +230,28 @@ def compile_recommendation_graph(
     original_ainvoke = compiled.ainvoke
 
     async def _ainvoke_with_dict(state, config=None, **kwargs):
-        if dataclasses.is_dataclass(state) and not isinstance(state, dict):
-            state_dict = dataclasses.asdict(state)
-        elif isinstance(state, RecommendationState):
-            state_dict = dataclasses.asdict(state)
+        # Preserve typed nested objects (UserPreferences) at the boundary.
+        # LangGraph requires a dict for internal propagation, but its
+        # dataclasses.asdict would silently convert UserPreferences to a plain
+        # dict, breaking nodes that expect attribute access.
+        # Use a shallow dict conversion that keeps nested dataclasses typed.
+        if isinstance(state, RecommendationState):
+            state_dict = {
+                "user_request": state.user_request,
+                "preferences": state.preferences,
+                "candidate_flights": state.candidate_flights,
+                "weather_data": state.weather_data,
+                "prediction_data": state.prediction_data,
+                "scored_flights": state.scored_flights,
+                "ranked_flights": state.ranked_flights,
+                "recommendation": state.recommendation,
+                "errors": state.errors,
+                "unavailable_data": state.unavailable_data,
+                "price_data_available": state.price_data_available,
+            }
+        elif dataclasses.is_dataclass(state) and not isinstance(state, dict):
+            # Generic shallow conversion for any dataclass
+            state_dict = {f.name: getattr(state, f.name) for f in dataclasses.fields(state)}
         else:
             state_dict = state
         return await original_ainvoke(state_dict, config=config, **kwargs)

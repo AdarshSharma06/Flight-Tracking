@@ -1,5 +1,6 @@
 """Tests for AI-5: LangGraph Flight Recommendation Agent."""
 
+import dataclasses
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1066,3 +1067,450 @@ class TestAPISecurity:
                 headers={"X-AI-Service-Key": "test-key"},
             )
             assert response.status_code != 401
+
+
+# ===== Dict→UserPreferences Coercion Regression Tests =====
+# These verify that the AI-5/AI-6 type consistency fix works:
+# LangGraph serializes state to dicts internally; nodes and routing
+# functions must handle both dict and RecommendationState inputs.
+
+
+class TestStateCoercion:
+    """Tests for coerce_recommendation_state / _coerce_user_preferences."""
+
+    def test_coerce_none_returns_empty(self):
+        from app.agents.state import coerce_recommendation_state
+        s = coerce_recommendation_state(None)
+        assert isinstance(s, RecommendationState)
+        assert s.preferences is None
+
+    def test_coerce_recommendation_state_passthrough(self):
+        from app.agents.state import coerce_recommendation_state
+        prefs = UserPreferences(origin="DEL", destination="BOM", direct_only=True)
+        s = RecommendationState(user_request="test", preferences=prefs)
+        result = coerce_recommendation_state(s)
+        assert result is s
+        assert isinstance(result.preferences, UserPreferences)
+        assert result.preferences.origin == "DEL"
+
+    def test_coerce_recommendation_state_fixes_dict_preferences(self):
+        from app.agents.state import coerce_recommendation_state
+        prefs = UserPreferences(origin="DEL", destination="BOM")
+        s = RecommendationState(user_request="test", preferences=prefs)
+        # Simulate LangGraph asdict conversion
+        s_dict = dataclasses.asdict(s)
+        # s_dict["preferences"] is now a plain dict
+        assert isinstance(s_dict["preferences"], dict)
+        result = coerce_recommendation_state(s_dict)
+        assert isinstance(result.preferences, UserPreferences)
+        assert result.preferences.origin == "DEL"
+        assert result.preferences.destination == "BOM"
+
+    def test_coerce_plain_dict_with_preferences(self):
+        from app.agents.state import coerce_recommendation_state
+        state_dict = {
+            "user_request": "Find flights",
+            "preferences": {"origin": "DEL", "destination": "BOM", "direct_only": True, "travel_time": "evening"},
+            "candidate_flights": [],
+            "weather_data": {},
+            "prediction_data": {},
+            "scored_flights": [],
+            "ranked_flights": [],
+            "recommendation": None,
+            "errors": [],
+            "unavailable_data": [],
+            "price_data_available": False,
+        }
+        result = coerce_recommendation_state(state_dict)
+        assert isinstance(result, RecommendationState)
+        assert isinstance(result.preferences, UserPreferences)
+        assert result.preferences.origin == "DEL"
+        assert result.preferences.destination == "BOM"
+        assert result.preferences.direct_only is True
+        assert result.preferences.travel_time == "evening"
+
+    def test_coerce_plain_dict_no_preferences(self):
+        from app.agents.state import coerce_recommendation_state
+        state_dict = {
+            "user_request": "hello",
+            "preferences": None,
+            "candidate_flights": [],
+        }
+        result = coerce_recommendation_state(state_dict)
+        assert isinstance(result, RecommendationState)
+        assert result.preferences is None
+
+    def test_coerce_direct_only_false_preserved(self):
+        from app.agents.state import coerce_recommendation_state
+        state_dict = {
+            "user_request": "test",
+            "preferences": {"origin": "DEL", "destination": "BOM", "direct_only": False},
+        }
+        result = coerce_recommendation_state(state_dict)
+        assert result.preferences.direct_only is False
+
+
+class TestCoercionThroughGraph:
+    """End-to-end graph tests that exercise dict coercion via stored preferences."""
+
+    @pytest.mark.asyncio
+    async def test_graph_end_to_end_with_stored_preferences(self):
+        """Full graph with UserPreferences pre-loaded (simulating AI-6 merge)."""
+        from app.agents.recommendation_agent import compile_recommendation_graph
+
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            side_effect=[
+                LLMResponse(
+                    content='{"origin": "DEL", "destination": "BOM", "direct_only": true, "travel_time": "evening"}',
+                    model="test",
+                ),
+                LLMResponse(
+                    content="Flight AI302 is recommended as it is direct and departs in the evening.",
+                    model="test",
+                ),
+            ]
+        )
+        compiled = compile_recommendation_graph(llm)
+
+        search_result = ToolResult(
+            success=True,
+            data={
+                "flights": [
+                    {
+                        "flight_iata": "AI302",
+                        "dep_iata": "DEL",
+                        "arr_iata": "BOM",
+                        "departure_time": "2025-01-15T18:00",
+                        "status": "scheduled",
+                    }
+                ]
+            },
+        )
+        status_result = ToolResult(success=True, data={"status": "scheduled", "aircraft": "B787"})
+        weather_result = ToolResult(success=True, data={"temperature": 20.0, "weatherCondition": "Clear"})
+
+        async def mock_execute(name, args):
+            if name == "search_flights":
+                return search_result
+            elif name == "get_flight_status":
+                return status_result
+            elif name == "get_weather":
+                return weather_result
+            return ToolResult(success=False, error="unknown")
+
+        with patch("app.agents.nodes.registry") as mock_reg:
+            mock_reg.execute = AsyncMock(side_effect=mock_execute)
+
+            # Simulate AI-6: stored prefs merged before graph invocation
+            stored_prefs = UserPreferences(origin="DEL", destination="BOM", direct_only=True, travel_time="evening")
+            initial = RecommendationState(
+                user_request="Find me a direct evening flight from Delhi to Mumbai",
+                preferences=stored_prefs,
+            )
+            final = await compiled.ainvoke(initial)
+
+            assert isinstance(final, dict)
+            rec = final.get("recommendation")
+            assert rec is not None
+            # Verify preferences were preserved through the graph
+            prefs = final.get("preferences")
+            assert isinstance(prefs, UserPreferences)
+            assert prefs.origin == "DEL"
+            assert prefs.destination == "BOM"
+            assert prefs.direct_only is True
+
+    @pytest.mark.asyncio
+    async def test_graph_stored_prefs_merged_with_llm_parse(self):
+        """Stored direct_only=true + LLM parse of origin/dest merges correctly."""
+        from app.agents.recommendation_agent import compile_recommendation_graph
+
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            side_effect=[
+                # LLM returns origin/dest but does NOT set direct_only
+                LLMResponse(
+                    content='{"origin": "DEL", "destination": "BOM", "direct_only": null}',
+                    model="test",
+                ),
+                LLMResponse(content="Recommended.", model="test"),
+            ]
+        )
+        compiled = compile_recommendation_graph(llm)
+
+        search_result = ToolResult(
+            success=True,
+            data={
+                "flights": [
+                    {
+                        "flight_iata": "AI302",
+                        "dep_iata": "DEL",
+                        "arr_iata": "BOM",
+                        "departure_time": "2025-01-15T10:00",
+                        "status": "scheduled",
+                    }
+                ]
+            },
+        )
+        status_result = ToolResult(success=True, data={"status": "scheduled"})
+        weather_result = ToolResult(success=True, data={"temperature": 25.0, "weatherCondition": "Clear"})
+
+        async def mock_execute(name, args):
+            if name == "search_flights":
+                return search_result
+            elif name == "get_flight_status":
+                return status_result
+            elif name == "get_weather":
+                return weather_result
+            return ToolResult(success=False, error="unknown")
+
+        with patch("app.agents.nodes.registry") as mock_reg:
+            mock_reg.execute = AsyncMock(side_effect=mock_execute)
+
+            # Stored: direct_only=true, travel_time=evening
+            stored_prefs = UserPreferences(direct_only=True, travel_time="evening")
+            initial = RecommendationState(
+                user_request="Find a flight from Delhi to Mumbai",
+                preferences=stored_prefs,
+            )
+            final = await compiled.ainvoke(initial)
+
+            assert isinstance(final, dict)
+            prefs = final.get("preferences")
+            assert isinstance(prefs, UserPreferences)
+            # LLM provided origin/dest, stored direct_only preserved
+            assert prefs.origin == "DEL"
+            assert prefs.destination == "BOM"
+            assert prefs.direct_only is True
+            assert prefs.travel_time == "evening"
+
+    @pytest.mark.asyncio
+    async def test_graph_dict_state_input_coercion(self):
+        """Graph receives a raw dict (as LangGraph would produce) and handles it."""
+        from app.agents.recommendation_agent import compile_recommendation_graph
+
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            side_effect=[
+                LLMResponse(
+                    content='{"origin": "DEL", "destination": "BOM"}',
+                    model="test",
+                ),
+                LLMResponse(content="Recommended.", model="test"),
+            ]
+        )
+        compiled = compile_recommendation_graph(llm)
+
+        search_result = ToolResult(
+            success=True,
+            data={
+                "flights": [
+                    {
+                        "flight_iata": "AI302",
+                        "dep_iata": "DEL",
+                        "arr_iata": "BOM",
+                        "status": "scheduled",
+                    }
+                ]
+            },
+        )
+        status_result = ToolResult(success=True, data={"status": "scheduled"})
+        weather_result = ToolResult(success=True, data={"temperature": 25.0, "weatherCondition": "Clear"})
+
+        async def mock_execute(name, args):
+            if name == "search_flights":
+                return search_result
+            elif name == "get_flight_status":
+                return status_result
+            elif name == "get_weather":
+                return weather_result
+            return ToolResult(success=False, error="unknown")
+
+        with patch("app.agents.nodes.registry") as mock_reg:
+            mock_reg.execute = AsyncMock(side_effect=mock_execute)
+
+            # Pass a raw dict (simulating what LangGraph produces internally)
+            state_dict = {
+                "user_request": "Find flights from Delhi to Mumbai",
+                "preferences": None,
+                "candidate_flights": [],
+                "weather_data": {},
+                "prediction_data": {},
+                "scored_flights": [],
+                "ranked_flights": [],
+                "recommendation": None,
+                "errors": [],
+                "unavailable_data": [],
+                "price_data_available": False,
+            }
+            final = await compiled.ainvoke(state_dict)
+
+            assert isinstance(final, dict)
+            rec = final.get("recommendation")
+            assert rec is not None
+
+    @pytest.mark.asyncio
+    async def test_graph_asdict_input_coercion(self):
+        """Graph receives asdict()-converted RecommendationState and handles it."""
+        from app.agents.recommendation_agent import compile_recommendation_graph
+
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            side_effect=[
+                LLMResponse(
+                    content='{"origin": "DEL", "destination": "BOM"}',
+                    model="test",
+                ),
+                LLMResponse(content="Recommended.", model="test"),
+            ]
+        )
+        compiled = compile_recommendation_graph(llm)
+
+        search_result = ToolResult(
+            success=True,
+            data={
+                "flights": [
+                    {
+                        "flight_iata": "AI302",
+                        "dep_iata": "DEL",
+                        "arr_iata": "BOM",
+                        "status": "scheduled",
+                    }
+                ]
+            },
+        )
+        status_result = ToolResult(success=True, data={"status": "scheduled"})
+        weather_result = ToolResult(success=True, data={"temperature": 25.0, "weatherCondition": "Clear"})
+
+        async def mock_execute(name, args):
+            if name == "search_flights":
+                return search_result
+            elif name == "get_flight_status":
+                return status_result
+            elif name == "get_weather":
+                return weather_result
+            return ToolResult(success=False, error="unknown")
+
+        with patch("app.agents.nodes.registry") as mock_reg:
+            mock_reg.execute = AsyncMock(side_effect=mock_execute)
+
+            # Create RecommendationState with stored prefs, then asdict it
+            # (simulating LangGraph internal serialization)
+            original = RecommendationState(
+                user_request="Find flights from Delhi to Mumbai",
+                preferences=UserPreferences(origin="DEL", destination="BOM"),
+            )
+            asdict_state = dataclasses.asdict(original)
+            # preferences is now a dict
+            assert isinstance(asdict_state["preferences"], dict)
+
+            final = await compiled.ainvoke(asdict_state)
+
+            assert isinstance(final, dict)
+            rec = final.get("recommendation")
+            assert rec is not None
+
+    @pytest.mark.asyncio
+    async def test_route_after_parse_with_dict_preferences(self):
+        """_route_after_parse handles dict preferences without AttributeError."""
+        from app.agents.recommendation_agent import _route_after_parse
+
+        # Simulate LangGraph asdict conversion of state with preferences
+        state_dict = {
+            "user_request": "test",
+            "preferences": {"origin": "DEL", "destination": "BOM"},
+            "errors": [],
+        }
+        route = _route_after_parse(state_dict)
+        assert route == "search_flights"
+
+    @pytest.mark.asyncio
+    async def test_route_after_parse_with_empty_dict_preferences(self):
+        """_route_after_parse handles empty dict preferences."""
+        from app.agents.recommendation_agent import _route_after_parse
+
+        state_dict = {
+            "user_request": "test",
+            "preferences": {"origin": None, "destination": None},
+            "errors": [],
+        }
+        route = _route_after_parse(state_dict)
+        assert route == "end_no_preferences"
+
+    @pytest.mark.asyncio
+    async def test_route_after_parse_with_none_preferences(self):
+        """_route_after_parse handles None preferences."""
+        from app.agents.recommendation_agent import _route_after_parse
+
+        state_dict = {
+            "user_request": "test",
+            "preferences": None,
+            "errors": [],
+        }
+        route = _route_after_parse(state_dict)
+        assert route == "end_no_preferences"
+
+    @pytest.mark.asyncio
+    async def test_parse_preferences_with_dict_existing(self):
+        """parse_preferences handles existing dict preferences (the original bug)."""
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            return_value=LLMResponse(
+                content='{"origin": "DEL", "destination": "BOM"}',
+                model="test",
+            )
+        )
+
+        # Simulate LangGraph state: preferences is a dict (from asdict)
+        state_dict = {
+            "user_request": "Find flights from Delhi to Mumbai",
+            "preferences": {"direct_only": True, "travel_time": "evening"},
+            "errors": [],
+        }
+
+        result = await parse_preferences(state_dict, llm)
+        prefs = result["preferences"]
+        assert isinstance(prefs, UserPreferences)
+        assert prefs.origin == "DEL"
+        assert prefs.destination == "BOM"
+        # Stored preferences merged
+        assert prefs.direct_only is True
+        assert prefs.travel_time == "evening"
+
+    @pytest.mark.asyncio
+    async def test_search_flights_with_dict_preferences(self):
+        """search_flights handles dict preferences without AttributeError."""
+        from app.agents.state import coerce_recommendation_state
+
+        state_dict = {
+            "user_request": "test",
+            "preferences": {"origin": "DEL", "destination": "BOM"},
+            "candidate_flights": [],
+            "errors": [],
+            "unavailable_data": [],
+        }
+
+        with patch("app.agents.nodes.registry") as mock_reg:
+            mock_reg.execute = AsyncMock(return_value=ToolResult(success=True, data={"flights": []}))
+            result = await search_flights(state_dict)
+            assert "candidate_flights" in result
+
+    @pytest.mark.asyncio
+    async def test_get_weather_with_dict_preferences(self):
+        """get_weather handles dict preferences without AttributeError."""
+        state_dict = {
+            "user_request": "test",
+            "preferences": {"origin": "DEL", "destination": "BOM"},
+            "weather_data": {},
+            "unavailable_data": [],
+        }
+
+        with patch("app.agents.nodes.registry") as mock_reg:
+            mock_reg.execute = AsyncMock(return_value=ToolResult(success=True, data={"temperature": 25}))
+            result = await get_weather(state_dict)
+            assert "weather_data" in result

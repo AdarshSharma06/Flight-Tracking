@@ -26,6 +26,7 @@ from app.agents.state import (
     ScoredFlight,
     UserPreferences,
     WeatherInfo,
+    coerce_recommendation_state,
 )
 from app.agents.ranking import score_flight, rank_flights
 from app.llm.base import LLMClient, LLMMessage
@@ -90,6 +91,7 @@ async def parse_preferences(state: RecommendationState, llm: LLMClient) -> dict:
     LLM-extracted values override only non-null fields. This allows stored
     preferences to serve as defaults while explicit request values take precedence.
     """
+    state = coerce_recommendation_state(state)
     prompt = f"""Extract flight search preferences from this request. Return ONLY a JSON object.
 
 User request: "{state.user_request}"
@@ -148,6 +150,7 @@ Return JSON with these fields (use null for unknown/missing):
 
 async def search_flights(state: RecommendationState) -> dict:
     """Search for flights using existing ToolRegistry search_flights tool."""
+    state = coerce_recommendation_state(state)
     prefs = state.preferences
     if not prefs or (not prefs.origin and not prefs.destination):
         return {
@@ -220,6 +223,7 @@ async def enrich_flights(state: RecommendationState) -> dict:
     Does NOT use get_flight_tracking — live aircraft position is not relevant
     for flight recommendation scoring.
     """
+    state = coerce_recommendation_state(state)
     candidates = state.candidate_flights
     if not candidates:
         return {}
@@ -249,6 +253,7 @@ async def enrich_flights(state: RecommendationState) -> dict:
 
 async def get_weather(state: RecommendationState) -> dict:
     """Get weather at origin and destination airports."""
+    state = coerce_recommendation_state(state)
     prefs = state.preferences
     if not prefs:
         return {}
@@ -292,6 +297,7 @@ async def get_predictions(state: RecommendationState) -> dict:
     Currently returns unavailable predictions for all flights.
     The future AI-11 implementation should plug into this node.
     """
+    state = coerce_recommendation_state(state)
     predictions = {}
     unavailable = list(state.unavailable_data)
 
@@ -309,6 +315,7 @@ async def get_predictions(state: RecommendationState) -> dict:
 
 async def score_flights(state: RecommendationState) -> dict:
     """Score each flight candidate deterministically."""
+    state = coerce_recommendation_state(state)
     prefs = state.preferences
     if not prefs:
         prefs = UserPreferences()
@@ -325,6 +332,7 @@ async def score_flights(state: RecommendationState) -> dict:
 
 async def rank_flights_node(state: RecommendationState) -> dict:
     """Rank scored flights by total score, descending."""
+    state = coerce_recommendation_state(state)
     ranked = rank_flights(state.scored_flights)
     return {"ranked_flights": ranked}
 
@@ -333,6 +341,7 @@ async def generate_recommendation(
     state: RecommendationState, llm: LLMClient
 ) -> dict:
     """Generate a human-readable recommendation using the LLM, grounded in actual data."""
+    state = coerce_recommendation_state(state)
     if not state.ranked_flights:
         limitation_msgs = list(state.errors)
         if "no_flights_found" in state.unavailable_data:
@@ -471,6 +480,7 @@ If a budget was specified but price data is unavailable, clearly state that budg
 
 def _build_data_summary(state: RecommendationState) -> dict:
     """Build a summary of available data for the LLM prompt."""
+    state = coerce_recommendation_state(state)
     summary = {}
 
     if state.weather_data:
