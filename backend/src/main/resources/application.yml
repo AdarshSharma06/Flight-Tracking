@@ -45,6 +45,15 @@ app:
     api-key: ${AVIATIONSTACK_API_KEY:demo}
     base-url: ${AVIATIONSTACK_BASE_URL:http://api.aviationstack.com/v1}
     timeout-ms: ${AVIATIONSTACK_TIMEOUT_MS:5000}
+  aerodatabox:
+    api-key: ${AERODATABOX_API_KEY:}
+    base-url: ${AERODATABOX_BASE_URL:https://prod.api.market/api/v1/aedbx/aerodatabox}
+    timeout-ms: ${AERODATABOX_TIMEOUT_MS:10000}
+  opensky:
+    base-url: ${OPENSKY_BASE_URL:https://opensky-network.org/api}
+    client-id: ${OPENSKY_CLIENT_ID:}
+    client-secret: ${OPENSKY_CLIENT_SECRET:}
+    timeout-ms: ${OPENSKY_TIMEOUT_MS:10000}
   open-meteo:
     base-url: ${OPENMETEO_BASE_URL:https://api.open-meteo.com}
     timeout-ms: ${OPENMETEO_TIMEOUT_MS:5000}

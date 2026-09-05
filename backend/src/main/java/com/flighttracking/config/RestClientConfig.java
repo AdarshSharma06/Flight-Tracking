@@ -7,7 +7,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 @Configuration
-@EnableConfigurationProperties({AviationStackProperties.class, OpenMeteoProperties.class})
+@EnableConfigurationProperties({AviationStackProperties.class, AerodataboxProperties.class, OpenSkyProperties.class, OpenMeteoProperties.class})
 public class RestClientConfig {
 
     @Bean
@@ -21,6 +21,30 @@ public class RestClientConfig {
         factory.setConnectTimeout(props.timeoutMs());
         factory.setReadTimeout(props.timeoutMs());
         return builder
+                .baseUrl(props.baseUrl())
+                .requestFactory(factory)
+                .build();
+    }
+
+    @Bean
+    public RestClient aerodataboxRestClient(RestClient.Builder builder, AerodataboxProperties props) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(props.timeoutMs());
+        factory.setReadTimeout(props.timeoutMs());
+        return builder
+                .clone()
+                .baseUrl(props.baseUrl())
+                .requestFactory(factory)
+                .build();
+    }
+
+    @Bean
+    public RestClient openSkyRestClient(RestClient.Builder builder, OpenSkyProperties props) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(props.timeoutMs());
+        factory.setReadTimeout(props.timeoutMs());
+        return builder
+                .clone()
                 .baseUrl(props.baseUrl())
                 .requestFactory(factory)
                 .build();

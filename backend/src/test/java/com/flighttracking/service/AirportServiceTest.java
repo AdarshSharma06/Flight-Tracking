@@ -1,10 +1,11 @@
 package com.flighttracking.service;
 
 import com.flighttracking.client.AirportClient;
-import com.flighttracking.client.AviationStackClient;
-import com.flighttracking.client.AviationStackResponse;
 import com.flighttracking.dto.airport.AirportDto;
+import com.flighttracking.dto.flight.FlightDto;
+import com.flighttracking.exception.ExternalApiException;
 import com.flighttracking.exception.ResourceNotFoundException;
+import com.flighttracking.provider.FlightProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -12,10 +13,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class AirportServiceTest {
@@ -23,16 +27,50 @@ class AirportServiceTest {
     @Mock
     AirportClient airportClient;
     @Mock
-    AviationStackClient aviationStackClient;
+    FlightProvider flightProvider;
     @InjectMocks
     AirportService service;
 
+    private AirportDto sampleAirport() {
+        return new AirportDto("DEL","VIDP","Indira Gandhi International Airport","New Delhi","India",28.5,77.1,"Asia/Kolkata","IN");
+    }
+
     @Test
-    void getAirportSuccess() {
-        when(airportClient.getByIata("DEL")).thenReturn(new AirportDto("DEL","VIDP","Indira Gandhi","New Delhi","India",28.5,77.1,"Asia/Kolkata","IN"));
+    void getAirportUsesFlightProviderFirst() {
+        when(flightProvider.getAirportByIata("DEL")).thenReturn(Optional.of(sampleAirport()));
         var dto = service.getAirport("DEL");
         assertThat(dto.iata()).isEqualTo("DEL");
         assertThat(dto.city()).isEqualTo("New Delhi");
+        verify(flightProvider).getAirportByIata("DEL");
+        verify(airportClient, never()).getByIata(anyString());
+    }
+
+    @Test
+    void getAirportFallsBackToLocalJsonWhenProviderEmpty() {
+        when(flightProvider.getAirportByIata("DEL")).thenReturn(Optional.empty());
+        when(airportClient.getByIata("DEL")).thenReturn(sampleAirport());
+        var dto = service.getAirport("DEL");
+        assertThat(dto.iata()).isEqualTo("DEL");
+        verify(flightProvider).getAirportByIata("DEL");
+        verify(airportClient).getByIata("DEL");
+    }
+
+    @Test
+    void getAirportProviderExceptionPropagates() {
+        when(flightProvider.getAirportByIata("DEL"))
+                .thenThrow(new ExternalApiException("AeroDataBox unavailable", 502));
+        assertThatThrownBy(() -> service.getAirport("DEL"))
+                .isInstanceOf(ExternalApiException.class);
+        verify(airportClient, never()).getByIata(anyString());
+    }
+
+    @Test
+    void getAirportProviderTimeoutPropagates() {
+        when(flightProvider.getAirportByIata("DEL"))
+                .thenThrow(new ExternalApiException("Request timeout", 504));
+        assertThatThrownBy(() -> service.getAirport("DEL"))
+                .isInstanceOf(ExternalApiException.class);
+        verify(airportClient, never()).getByIata(anyString());
     }
 
     @Test
@@ -45,6 +83,7 @@ class AirportServiceTest {
 
     @Test
     void getAirportNotFoundPropagates() {
+        when(flightProvider.getAirportByIata("ZZZ")).thenReturn(Optional.empty());
         when(airportClient.getByIata("ZZZ")).thenThrow(new ResourceNotFoundException("not found"));
         assertThatThrownBy(() -> service.getAirport("ZZZ"))
                 .isInstanceOf(ResourceNotFoundException.class);
@@ -52,19 +91,14 @@ class AirportServiceTest {
 
     @Test
     void getDeparturesSuccess() {
-        AviationStackResponse resp = new AviationStackResponse(
-                new AviationStackResponse.Pagination(10,0,1,1),
-                List.of(new AviationStackResponse.FlightData(
-                        "2026-09-01","scheduled",
-                        new AviationStackResponse.Departure("DEL Airport","Asia/Kolkata","DEL","VIDP","3","1",null,"2026-09-01T10:00:00+0000","2026-09-01T10:00:00+0000",null,null,null),
-                        new AviationStackResponse.Arrival("JFK Airport","America/New_York","JFK","KJFK","4","B",null,"2026-09-01T18:00:00+0000","2026-09-01T18:00:00+0000",null,null,null,null),
-                        new AviationStackResponse.Airline("IndiGo","6E","IGO"),
-                        new AviationStackResponse.Flight("123","6E123","IGO123",null),
-                        new AviationStackResponse.Aircraft("VT-ABC","A320","A320","a"),
-                        null
-                )), null
+        FlightDto dto = new FlightDto(
+                "6E123","6E123","IGO123",
+                "IndiGo","6E","IGO",
+                "Delhi Airport","DEL","VIDP","3","1",null,null,null,null,
+                "JFK Airport","JFK","KJFK","4","B",null,null,null,null,
+                "scheduled","VT-ABC","A320","a"
         );
-        when(aviationStackClient.searchFlights(null,"DEL",null,null,null,5)).thenReturn(resp);
+        when(flightProvider.getAirportDepartures("DEL", 5)).thenReturn(List.of(dto));
         var flights = service.getDepartures("DEL", 5);
         assertThat(flights).hasSize(1);
         assertThat(flights.get(0).departureIata()).isEqualTo("DEL");
@@ -72,10 +106,7 @@ class AirportServiceTest {
 
     @Test
     void getArrivalsSuccess() {
-        AviationStackResponse resp = new AviationStackResponse(
-                new AviationStackResponse.Pagination(10,0,0,0), List.of(), null
-        );
-        when(aviationStackClient.searchFlights(null,null,"DEL",null,null,null)).thenReturn(resp);
+        when(flightProvider.getAirportArrivals("DEL", null)).thenReturn(List.of());
         var flights = service.getArrivals("DEL", null);
         assertThat(flights).isEmpty();
     }

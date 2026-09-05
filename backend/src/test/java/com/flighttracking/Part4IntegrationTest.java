@@ -1,13 +1,16 @@
 package com.flighttracking;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.flighttracking.client.AviationStackClient;
-import com.flighttracking.client.AviationStackResponse;
 import com.flighttracking.dto.booking.BookingRequest;
+import com.flighttracking.dto.flight.FlightDto;
+import com.flighttracking.dto.flight.FlightSearchResponse;
+import com.flighttracking.dto.flight.FlightTrackingDto;
 import com.flighttracking.dto.telemetry.TelemetryRequest;
 import com.flighttracking.dto.anomaly.AnomalyRequest;
 import com.flighttracking.entity.Role;
 import com.flighttracking.entity.User;
+import com.flighttracking.provider.FlightProvider;
+import com.flighttracking.provider.TrackingProvider;
 import com.flighttracking.repository.BookingRepository;
 import com.flighttracking.repository.TelemetryRepository;
 import com.flighttracking.repository.AnomalyRecordRepository;
@@ -25,6 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -48,7 +52,10 @@ class Part4IntegrationTest {
     @Autowired JwtService jwtService;
 
     @MockitoBean
-    AviationStackClient aviationStackClient;
+    FlightProvider flightProvider;
+
+    @MockitoBean
+    TrackingProvider trackingProvider;
 
     @BeforeEach
     void clean() {
@@ -59,7 +66,6 @@ class Part4IntegrationTest {
     }
 
     private String registerAndLogin(String username) throws Exception {
-        // register via API to ensure same flow
         String reg = objectMapper.writeValueAsString(new com.flighttracking.dto.RegisterRequest(username, "password123"));
         mockMvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON).content(reg))
                 .andExpect(status().isCreated());
@@ -75,20 +81,34 @@ class Part4IntegrationTest {
         return jwtService.generateToken("atcPart4", Role.ATC_EMPLOYEE.name());
     }
 
-    private AviationStackResponse sampleResponseWithLive() {
-        AviationStackResponse.Live live = new AviationStackResponse.Live(
-                "2026-09-02T10:00:00+0000", 28.5, 77.0, 10000.0, 90.0, 450.0, 5.0, false
+    private FlightTrackingDto sampleTrackingWithLive() {
+        return new FlightTrackingDto(
+                "6E123", "6E123", "IGO123", "2026-09-01", "active",
+                "IndiGo", "6E", "IGO",
+                "VT-ABC", "A320", "A320",
+                "Delhi Airport", "DEL", "VIDP", "3", "A",
+                "2026-09-01T10:00:00Z", "2026-09-01T10:00:00Z", null,
+                "JFK Airport", "JFK", "KJFK", "4", "B",
+                "2026-09-01T18:00:00Z", "2026-09-01T18:00:00Z", null,
+                "DEL -> JFK",
+                28.5, 77.0, 10000.0, 450.0, 5.0, 90.0, false,
+                "2026-09-02T10:00:00Z", null, null
         );
-        AviationStackResponse.FlightData data = new AviationStackResponse.FlightData(
-                "2026-09-01", "active",
-                new AviationStackResponse.Departure("Delhi Airport", "Asia/Kolkata", "DEL", "VIDP", "3", "A", null, "2026-09-01T10:00:00+0000", "2026-09-01T10:00:00+0000", null, null, null),
-                new AviationStackResponse.Arrival("JFK Airport", "America/New_York", "JFK", "KJFK", "4", "B", null, "2026-09-01T18:00:00+0000", "2026-09-01T18:00:00+0000", null, null, null, null),
-                new AviationStackResponse.Airline("IndiGo", "6E", "IGO"),
-                new AviationStackResponse.Flight("123", "6E123", "IGO123", null),
-                new AviationStackResponse.Aircraft("VT-ABC", "A320", "A320", "abc123"),
-                live
+    }
+
+    private FlightTrackingDto sampleTrackingNoLive() {
+        return new FlightTrackingDto(
+                "6E999", "6E999", "IGO999", "2026-09-01", "scheduled",
+                "IndiGo", "6E", "IGO",
+                "VT-ABC", "A320", "A320",
+                "Delhi Airport", "DEL", "VIDP", "3", "A",
+                "2026-09-01T10:00:00Z", "2026-09-01T10:00:00Z", null,
+                "JFK Airport", "JFK", "KJFK", "4", "B",
+                "2026-09-01T18:00:00Z", "2026-09-01T18:00:00Z", null,
+                "DEL -> JFK",
+                null, null, null, null, null, null, null,
+                null, null, null
         );
-        return new AviationStackResponse(new AviationStackResponse.Pagination(10,0,1,1), List.of(data), null);
     }
 
     // ---- Booking ----
@@ -107,12 +127,10 @@ class Part4IntegrationTest {
                 .andReturn();
         Long id = objectMapper.readTree(res.getResponse().getContentAsString()).get("id").asLong();
 
-        // history
         mockMvc.perform(get("/api/bookings").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(id));
 
-        // get by id
         mockMvc.perform(get("/api/bookings/" + id).header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id));
@@ -142,11 +160,9 @@ class Part4IntegrationTest {
                 .andExpect(status().isCreated()).andReturn();
         Long id = objectMapper.readTree(res.getResponse().getContentAsString()).get("id").asLong();
 
-        // userB tries to get userA's booking -> 404 (not found for this user)
         mockMvc.perform(get("/api/bookings/" + id).header("Authorization", "Bearer " + tokenB))
                 .andExpect(status().isNotFound());
 
-        // userB history should be empty
         mockMvc.perform(get("/api/bookings").header("Authorization", "Bearer " + tokenB))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(0));
@@ -155,7 +171,6 @@ class Part4IntegrationTest {
     @Test
     void invalidBookingDataRejected() throws Exception {
         String token = registerAndLogin("invalidBook");
-        // blank flightNumber
         BookingRequest bad = new BookingRequest("", "DEL", "JFK", null, null, null, null);
         mockMvc.perform(post("/api/bookings").header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(bad)))
@@ -178,7 +193,9 @@ class Part4IntegrationTest {
     @Test
     void flightTrackingEndpointWorks() throws Exception {
         String token = registerAndLogin("trackUser");
-        when(aviationStackClient.getFlightsByIata("6E123")).thenReturn(sampleResponseWithLive());
+        FlightTrackingDto trackingDto = sampleTrackingWithLive();
+        when(flightProvider.getFlightTracking("6E123")).thenReturn(trackingDto);
+        when(trackingProvider.getByIcao24("A320")).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/flights/6E123/tracking").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -194,18 +211,10 @@ class Part4IntegrationTest {
     @Test
     void trackingUnavailableFieldsHandledAsNull() throws Exception {
         String token = registerAndLogin("trackNull");
-        AviationStackResponse noLive = new AviationStackResponse(
-                new AviationStackResponse.Pagination(10,0,1,1),
-                List.of(new AviationStackResponse.FlightData(
-                        "2026-09-01", "scheduled",
-                        new AviationStackResponse.Departure("Delhi Airport", "Asia/Kolkata", "DEL", "VIDP", "3", "A", null, "2026-09-01T10:00:00+0000", "2026-09-01T10:00:00+0000", null, null, null),
-                        new AviationStackResponse.Arrival("JFK Airport", "America/New_York", "JFK", "KJFK", "4", "B", null, "2026-09-01T18:00:00+0000", "2026-09-01T18:00:00+0000", null, null, null, null),
-                        new AviationStackResponse.Airline("IndiGo", "6E", "IGO"),
-                        new AviationStackResponse.Flight("123", "6E999", "IGO999", null),
-                        new AviationStackResponse.Aircraft("VT-ABC", "A320", "A320", "abc123"),
-                        null
-                )), null);
-        when(aviationStackClient.getFlightsByIata("6E999")).thenReturn(noLive);
+        FlightTrackingDto noLive = sampleTrackingNoLive();
+        when(flightProvider.getFlightTracking("6E999")).thenReturn(noLive);
+        when(trackingProvider.getByIcao24("A320")).thenReturn(Optional.empty());
+
         mockMvc.perform(get("/api/flights/6E999/tracking").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.flightIata").value("6E999"))
@@ -215,22 +224,27 @@ class Part4IntegrationTest {
     @Test
     void flightSearchSorting() throws Exception {
         String token = registerAndLogin("sortUser");
-        AviationStackResponse.FlightData d1 = new AviationStackResponse.FlightData(
-                "2026-09-01", "scheduled",
-                new AviationStackResponse.Departure("Delhi Airport", "Asia/Kolkata", "DEL", "VIDP", "3", "A", null, "2026-09-01T12:00:00+0000", null, null, null, null),
-                new AviationStackResponse.Arrival("JFK", "America/New_York", "JFK", "KJFK", "4", "B", null, "2026-09-01T18:00:00+0000", null, null, null, null, null),
-                new AviationStackResponse.Airline("A1", "AA", "AAL"), new AviationStackResponse.Flight("1","AA100","AAL100",null),
-                new AviationStackResponse.Aircraft("N1","A320","A320","irc"), null);
-        AviationStackResponse.FlightData d2 = new AviationStackResponse.FlightData(
-                "2026-09-01", "scheduled",
-                new AviationStackResponse.Departure("Delhi Airport", "Asia/Kolkata", "DEL", "VIDP", "3", "A", null, "2026-09-01T10:00:00+0000", null, null, null, null),
-                new AviationStackResponse.Arrival("JFK", "America/New_York", "JFK", "KJFK", "4", "B", null, "2026-09-01T18:00:00+0000", null, null, null, null, null),
-                new AviationStackResponse.Airline("A2", "BB", "BBA"), new AviationStackResponse.Flight("2","BB200","BBA200",null),
-                new AviationStackResponse.Aircraft("N2","A320","A320","irc2"), null);
-        AviationStackResponse resp = new AviationStackResponse(new AviationStackResponse.Pagination(10,0,2,2), List.of(d1,d2), null);
-        when(aviationStackClient.searchFlights(any(), any(), any(), any(), any(), any())).thenReturn(resp);
+        FlightDto d1 = new FlightDto(
+                "1", "AA100", "AAL100",
+                "Airline A", "AA", "AAL",
+                "Delhi Airport", "DEL", "VIDP", "3", "A",
+                "2026-09-01T12:00:00Z", null, null, null,
+                "JFK Airport", "JFK", "KJFK", "4", "B",
+                "2026-09-01T18:00:00Z", null, null, null,
+                "scheduled", "N1", "A320", "irc"
+        );
+        FlightDto d2 = new FlightDto(
+                "2", "BB200", "BBA200",
+                "Airline B", "BB", "BBA",
+                "Delhi Airport", "DEL", "VIDP", "3", "A",
+                "2026-09-01T10:00:00Z", null, null, null,
+                "JFK Airport", "JFK", "KJFK", "4", "B",
+                "2026-09-01T18:00:00Z", null, null, null,
+                "scheduled", "N2", "A320", "irc2"
+        );
+        FlightSearchResponse resp = new FlightSearchResponse(List.of(d1, d2), 2);
+        when(flightProvider.searchFlights(any(), any(), any(), any(), any(), any())).thenReturn(resp);
 
-        // sort by flight_number asc: AA100 should be first
         mockMvc.perform(get("/api/flights/search").param("sortBy","flight_number").param("order","asc").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.flights[0].flightIata").value("AA100"))
@@ -241,14 +255,12 @@ class Part4IntegrationTest {
 
     @Test
     void atcEndpointsRequireAtcRole() throws Exception {
-        // unauthenticated -> 401
         mockMvc.perform(get("/api/atc/telemetry"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/atc/anomalies"))
                 .andExpect(status().isUnauthorized());
 
         String userToken = registerAndLogin("normalAtcTest");
-        // USER -> 403
         mockMvc.perform(get("/api/atc/telemetry").header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/atc/telemetry").header("Authorization", "Bearer " + userToken)
@@ -257,7 +269,6 @@ class Part4IntegrationTest {
         mockMvc.perform(get("/api/atc/anomalies").header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isForbidden());
 
-        // ATC_EMPLOYEE -> 200
         String atc = atcToken();
         mockMvc.perform(get("/api/atc/telemetry").header("Authorization", "Bearer " + atc))
                 .andExpect(status().isOk());
@@ -290,7 +301,6 @@ class Part4IntegrationTest {
     @Test
     void anomalyRecordPersistenceAndRetrieval() throws Exception {
         String atc = atcToken();
-        // create telemetry first
         TelemetryRequest treq = new TelemetryRequest("6E123", "6E123", null, null, "DEL", "JFK", 28.5, 77.0, 5000.0, 300.0, 45.0, null, "active", null, null);
         MvcResult tres = mockMvc.perform(post("/api/atc/telemetry").header("Authorization", "Bearer " + atc)
                         .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(treq)))
