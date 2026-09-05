@@ -2014,3 +2014,180 @@ class TestDirectOnlyThreeState:
             assert prefs.direct_only is False
             assert prefs.airline_preference is None
             assert prefs.travel_time is None
+
+
+# ===== Direct Preference & Delay Grounding Regression Tests =====
+
+
+class TestDirectPreferenceGrounding:
+    """Regression tests for direct preference scoring and grounding.
+
+    Issue: With stored direct_only=True, a direct flight was scored 0.5 instead
+    of 1.0 because is_direct was None (AviationStack doesn't provide stops data).
+    The LLM then incorrectly claimed the flight was "nonstop" despite score 0.5.
+    """
+
+    def test_score_direct_known_direct_with_preference(self):
+        """1. stored direct_only=True + known direct flight → direct_preference=1.0."""
+        c = FlightCandidate(flight_number="AI2678", is_direct=True)
+        prefs = UserPreferences(direct_only=True)
+        assert _score_direct_preference(c, prefs) == 1.0
+
+    def test_score_direct_known_non_direct_with_preference(self):
+        """2. stored direct_only=True + known non-direct flight → direct_preference=0.0."""
+        c = FlightCandidate(flight_number="AI2678", is_direct=False)
+        prefs = UserPreferences(direct_only=True)
+        assert _score_direct_preference(c, prefs) == 0.0
+
+    def test_score_direct_unknown_with_preference(self):
+        """3. stored direct_only=True + directness unavailable → 0.5 (neutral/unavailable)."""
+        c = FlightCandidate(flight_number="AI2678", is_direct=None)
+        prefs = UserPreferences(direct_only=True)
+        assert _score_direct_preference(c, prefs) == 0.5
+
+    def test_score_direct_no_preference_known_direct(self):
+        """4. no direct preference + known direct flight → 0.5 (neutral)."""
+        c = FlightCandidate(flight_number="AI2678", is_direct=True)
+        prefs = UserPreferences(direct_only=False)
+        assert _score_direct_preference(c, prefs) == 0.5
+
+    @pytest.mark.asyncio
+    async def test_stored_direct_preserved_when_request_omits_direct(self):
+        """5. stored direct_only=True + request without direct wording → remains True."""
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            return_value=LLMResponse(
+                content='{"origin": "DEL", "destination": "BOM", "direct_only": null}'
+            )
+        )
+        state = RecommendationState(
+            user_request="Find me a flight from Delhi to Mumbai",
+            preferences=UserPreferences(direct_only=True),
+            errors=[],
+            unavailable_data=[],
+        )
+        result = await parse_preferences(state, llm)
+        prefs = result["preferences"]
+        assert prefs.direct_only is True
+
+    @pytest.mark.asyncio
+    async def test_explicit_connecting_overrides_stored_direct(self):
+        """6. explicit current request for connecting flight overrides stored direct=True."""
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+        llm.complete = AsyncMock(
+            return_value=LLMResponse(
+                content='{"origin": "DEL", "destination": "BOM", "direct_only": false}'
+            )
+        )
+        state = RecommendationState(
+            user_request="Find me a connecting flight from Delhi to Mumbai",
+            preferences=UserPreferences(direct_only=True),
+            errors=[],
+            unavailable_data=[],
+        )
+        result = await parse_preferences(state, llm)
+        prefs = result["preferences"]
+        assert prefs.direct_only is False
+
+    @pytest.mark.asyncio
+    async def test_generate_recommendation_no_false_direct_claim(self):
+        """7. recommendation prompt must not claim direct/nonstop when is_direct is None."""
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+
+        captured_prompts = []
+
+        async def capture_complete(messages, **kwargs):
+            captured_prompts.append(messages[0].content)
+            return LLMResponse(content="Flight AI2678 is recommended.", model="test")
+
+        llm.complete = AsyncMock(side_effect=capture_complete)
+
+        c = FlightCandidate(
+            flight_number="AI2678",
+            origin="DEL",
+            destination="BOM",
+            departure_time="2025-01-15T18:00",
+            airline="AI",
+            status="scheduled",
+            is_direct=None,
+        )
+        sf = ScoredFlight(
+            candidate=c,
+            score=0.75,
+            score_breakdown={
+                "direct_preference": 0.5,
+                "departure_convenience": 1.0,
+                "arrival_convenience": 0.8,
+                "weather_impact": 0.8,
+                "status_health": 1.0,
+                "delay_risk": 0.5,
+                "airline_match": 1.0,
+            },
+        )
+        state = RecommendationState(
+            user_request="Find me a flight from Delhi to Mumbai",
+            ranked_flights=[sf],
+            unavailable_data=["delay_predictions_not_implemented"],
+            preferences=UserPreferences(direct_only=True, airline_preference="AI"),
+        )
+        await generate_recommendation(state, llm)
+
+        assert len(captured_prompts) == 1
+        prompt = captured_prompts[0]
+        assert "Direct/nonstop: Unknown" in prompt
+        assert "directness data unavailable" in prompt
+        assert "delay prediction is NOT available" in prompt or "Delay prediction is not yet available" in prompt
+
+    @pytest.mark.asyncio
+    async def test_generate_recommendation_no_false_delay_claim(self):
+        """8. recommendation prompt must not claim 'low predicted delay risk' when prediction unavailable."""
+        llm = MagicMock(spec=LLMClient)
+        llm.is_configured.return_value = True
+
+        captured_prompts = []
+
+        async def capture_complete(messages, **kwargs):
+            captured_prompts.append(messages[0].content)
+            return LLMResponse(content="Flight AI2678 is recommended.", model="test")
+
+        llm.complete = AsyncMock(side_effect=capture_complete)
+
+        c = FlightCandidate(
+            flight_number="AI2678",
+            origin="DEL",
+            destination="BOM",
+            airline="AI",
+            status="scheduled",
+            is_direct=None,
+        )
+        sf = ScoredFlight(
+            candidate=c,
+            score=0.75,
+            score_breakdown={
+                "direct_preference": 0.5,
+                "departure_convenience": 0.7,
+                "arrival_convenience": 0.8,
+                "weather_impact": 0.8,
+                "status_health": 1.0,
+                "delay_risk": 0.5,
+                "airline_match": 1.0,
+            },
+        )
+        state = RecommendationState(
+            user_request="Find me a flight from Delhi to Mumbai",
+            ranked_flights=[sf],
+            unavailable_data=["delay_predictions_not_implemented"],
+            preferences=UserPreferences(direct_only=True, airline_preference="AI"),
+        )
+        await generate_recommendation(state, llm)
+
+        assert len(captured_prompts) == 1
+        prompt = captured_prompts[0]
+        # Prompt must explicitly say delay_risk 0.5 means unavailable, not low risk
+        assert "delay prediction is NOT available" in prompt or "Delay prediction is not yet available" in prompt
+        assert "not low risk" in prompt
+        # Prompt must distinguish status_health from delay prediction
+        assert "status health" in prompt.lower() or "delay prediction" in prompt.lower()

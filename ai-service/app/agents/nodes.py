@@ -522,20 +522,34 @@ Departure: {top.candidate.departure_time or 'unknown'}
 Arrival: {top.candidate.arrival_time or 'unknown'}
 Airline: {top.candidate.airline or 'unknown'}
 Status: {top.candidate.status or 'unknown'}
+Direct/nonstop: {'Yes' if top.candidate.is_direct else ('No' if top.candidate.is_direct is not None else 'Unknown — directness data unavailable from flight source')}
 Score: {top.score}/1.0
 
 SCORE BREAKDOWN:
 {json.dumps(top.score_breakdown, indent=2)}
-NOTE: A score of 0.5 for direct_preference or airline_match means no preference was specified (neutral). A score of 1.0 means the preference matched. A score below 0.5 means the preference was specified but not matched.
+
+Score interpretation rules:
+- direct_preference: 1.0 = preference matched (flight is confirmed direct). 0.0 = preference specified but flight is confirmed non-direct. 0.5 = either no preference was specified, OR preference was specified but directness data is unavailable (DO NOT claim the flight is direct or non-direct in this case).
+- airline_match: 1.0 = preference matched. 0.5 = no preference specified. Below 0.5 = preference specified but not matched.
+- delay_risk: 0.5 means delay prediction is NOT available (ML model pending). It does NOT mean low risk. Do NOT describe this as "low predicted delay risk" or similar. Say "delay prediction not available" instead.
+- All other factors: 0.5 means neutral/unavailable.
 
 WEATHER (if available):
 {data_summary.get('weather', 'Not available')}
 
 PREDICTIONS:
 Delay prediction is not yet available (ML model pending).
+The delay_risk score of 0.5 above means prediction is unavailable, not low risk.
 
 UNAVAILABLE DATA:
 {json.dumps(state.unavailable_data)}
+
+CRITICAL GROUNDING RULES:
+1. Never claim a flight is "direct" or "nonstop" unless direct_preference is 1.0 (confirmed direct) or the directness data explicitly says "Yes".
+2. If direct_preference is 0.5 and directness is "Unknown", state that directness could not be verified.
+3. Never claim "low predicted delay risk" or any delay prediction when delay_risk is 0.5. The delay prediction model is not implemented. State that delay prediction is unavailable.
+4. Distinguish between "status health" (the flight's current operational status) and "delay prediction" (a future prediction that is not yet available).
+5. Do not invent information not present in the data above.
 
 Generate a recommendation with:
 1. The recommended flight and why it was selected
