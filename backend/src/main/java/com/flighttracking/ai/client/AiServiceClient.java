@@ -5,12 +5,15 @@ import com.flighttracking.ai.dto.AtcExplanationRequest;
 import com.flighttracking.ai.dto.AtcExplanationResponse;
 import com.flighttracking.ai.dto.ChatRequest;
 import com.flighttracking.ai.dto.ChatResponse;
+import com.flighttracking.ai.dto.RecommendationRequest;
 import com.flighttracking.exception.ExternalApiException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+
+import java.util.Map;
 
 @Component
 public class AiServiceClient {
@@ -97,5 +100,35 @@ public class AiServiceClient {
     // Backwards-compatible overload
     public AtcExplanationResponse explainAnomaly(AtcExplanationRequest request, String userId) {
         return explainAnomaly(request, userId, null);
+    }
+
+    public Map<String, Object> recommend(RecommendationRequest request, String userId, String requestId) {
+        try {
+            log.debug("Sending recommendation request to AI service");
+            var builder = restClient.post()
+                    .uri("/api/ai/recommend")
+                    .header("X-User-Id", userId != null ? userId : "anonymous");
+            if (requestId != null && !requestId.isBlank()) {
+                builder = builder.header("X-Request-ID", requestId);
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> response = builder
+                    .body(request)
+                    .retrieve()
+                    .body(Map.class);
+
+            if (response == null) {
+                throw new ExternalApiException("Empty response from AI service", 502);
+            }
+            return response;
+        } catch (RestClientException e) {
+            log.error("AI service recommend request failed: {}", e.getMessage());
+            throw new ExternalApiException("AI service error: " + e.getMessage(), e);
+        }
+    }
+
+    // Backwards-compatible overload
+    public Map<String, Object> recommend(RecommendationRequest request, String userId) {
+        return recommend(request, userId, null);
     }
 }
