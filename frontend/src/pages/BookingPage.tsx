@@ -402,6 +402,15 @@ export function BookingPage() {
                   <AlertCircle className="size-4" />
                   <AlertTitle>No recommendation available</AlertTitle>
                   <AlertDescription className="text-xs">{aiResult.explanation || "No flights matched your criteria."}</AlertDescription>
+                  {aiResult.limitations && aiResult.limitations.length > 0 && (
+                    <AlertDescription className="text-xs mt-1">
+                      <ul className="list-disc ml-4 space-y-0.5">
+                        {aiResult.limitations.map((lim, idx) => (
+                          <li key={idx}>{lim}</li>
+                        ))}
+                      </ul>
+                    </AlertDescription>
+                  )}
                 </Alert>
               )}
 

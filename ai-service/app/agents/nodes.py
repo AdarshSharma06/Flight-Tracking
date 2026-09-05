@@ -65,11 +65,15 @@ MAX_SEARCH_RESULTS = 20
 _CITY_TO_IATA: dict[str, str] = {
     # India
     "delhi": "DEL",
+    "new delhi": "DEL",
     "mumbai": "BOM",
+    "bombay": "BOM",
     "bangalore": "BLR",
     "bengaluru": "BLR",
     "chennai": "MAA",
+    "madras": "MAA",
     "kolkata": "CCU",
+    "calcutta": "CCU",
     "hyderabad": "HYD",
     "pune": "PNQ",
     "ahmedabad": "AMD",
