@@ -97,18 +97,22 @@ public class FlightService {
     }
 
     private Optional<TrackingProvider.LiveTrackingData> resolveLiveData(FlightTrackingDto commercial) {
-        // 1. ICAO24 / Mode-S hex — most reliable, direct OpenSky key
-        if (commercial.aircraftIcao() != null && !commercial.aircraftIcao().isBlank()) {
-            Optional<TrackingProvider.LiveTrackingData> data =
-                    trackingProvider.getByIcao24(commercial.aircraftIcao().trim());
-            if (data.isPresent()) return data;
-        }
+        try {
+            // 1. ICAO24 / Mode-S hex — most reliable, direct OpenSky key
+            if (commercial.aircraftIcao() != null && !commercial.aircraftIcao().isBlank()) {
+                Optional<TrackingProvider.LiveTrackingData> data =
+                        trackingProvider.getByIcao24(commercial.aircraftIcao().trim());
+                if (data.isPresent()) return data;
+            }
 
-        // 2. ICAO callsign (e.g., IGO123) — may match OpenSky callsign field
-        if (commercial.flightIcao() != null && !commercial.flightIcao().isBlank()) {
-            Optional<TrackingProvider.LiveTrackingData> data =
-                    trackingProvider.getByCallsign(commercial.flightIcao().trim());
-            if (data.isPresent()) return data;
+            // 2. ICAO callsign (e.g., IGO123) — may match OpenSky callsign field
+            if (commercial.flightIcao() != null && !commercial.flightIcao().isBlank()) {
+                Optional<TrackingProvider.LiveTrackingData> data =
+                        trackingProvider.getByCallsign(commercial.flightIcao().trim());
+                if (data.isPresent()) return data;
+            }
+        } catch (Exception e) {
+            log.warn("Live telemetry enrichment failed for flight {}: {}", commercial.flightNumber(), e.getMessage());
         }
 
         // Do NOT use flightIata (IATA number, e.g. 6E123) as an OpenSky callsign.
