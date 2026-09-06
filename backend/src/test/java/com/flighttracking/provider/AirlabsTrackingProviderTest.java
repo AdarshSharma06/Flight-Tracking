@@ -137,4 +137,24 @@ class AirlabsTrackingProviderTest {
         assertThat(provider.getByIcao24("abc123")).isEmpty();
         assertThat(provider.getByCallsign("IGO123")).isEmpty();
     }
+
+    @Test
+    void invalidCoordinatesResultInNull() {
+        when(client.getFlightByIata("6E6706")).thenReturn(flight(100.0, 72.0, 35000.0, 450.0, 0.0, 120.0, "en-route", 1L));
+        var d1 = provider.getByFlightIata("6E6706").get();
+        assertThat(d1.latitude()).isNull();
+        assertThat(d1.longitude()).isNull();
+
+        when(client.getFlightByIata("6E6706")).thenReturn(flight(19.0, 200.0, 35000.0, 450.0, 0.0, 120.0, "en-route", 1L));
+        var d2 = provider.getByFlightIata("6E6706").get();
+        assertThat(d2.latitude()).isNull();
+        assertThat(d2.longitude()).isNull();
+    }
+
+    @Test
+    void oneRequestRuleSingleCallPerTracking() {
+        when(client.getFlightByIata("6E6706")).thenReturn(flight(19.0, 72.0, 35000.0, 450.0, 0.0, 120.0, "en-route", 1L));
+        provider.getByFlightIata("6E6706");
+        verify(client, times(1)).getFlightByIata("6E6706");
+    }
 }

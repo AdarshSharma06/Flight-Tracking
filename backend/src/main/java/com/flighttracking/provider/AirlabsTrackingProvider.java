@@ -69,6 +69,11 @@ public class AirlabsTrackingProvider implements TrackingProvider {
     private LiveTrackingData mapToLiveData(AirlabsFlight f) {
         Double lat = f.lat();
         Double lng = f.lng();
+        // Validate coordinates per spec: both present and within ranges, else both null
+        if (!isValidCoordinate(lat, lng)) {
+            lat = null;
+            lng = null;
+        }
         Double alt = f.alt();
         Double speed = f.speed();
         Double vSpeed = f.vSpeed();
@@ -77,7 +82,7 @@ public class AirlabsTrackingProvider implements TrackingProvider {
         Boolean onGround = mapOnGround(f.status());
         // AirLabs fields: alt is typically feet, speed may be knots or km/h — preserve as-is per existing conventions
         // Map lat/lng correctly: lng -> longitude, lat -> latitude
-        // Documented mapping in code
+        // Documented mapping in code: lat->latitude, lng->longitude, alt->altitude, speed->speed, v_speed->speedVertical, dir->direction, updated->liveUpdated
         return new LiveTrackingData(
                 f.hex(),
                 f.flightIcao(),
@@ -93,6 +98,13 @@ public class AirlabsTrackingProvider implements TrackingProvider {
                 onGround,
                 updated
         );
+    }
+
+    private boolean isValidCoordinate(Double lat, Double lng) {
+        if (lat == null || lng == null) return false;
+        if (lat < -90.0 || lat > 90.0) return false;
+        if (lng < -180.0 || lng > 180.0) return false;
+        return true;
     }
 
     /**
