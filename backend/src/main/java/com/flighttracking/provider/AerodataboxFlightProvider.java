@@ -34,7 +34,7 @@ public class AerodataboxFlightProvider implements FlightProvider {
             List<FlightDto> dtos = flights.stream()
                     .map(this::toDto)
                     .toList();
-            return new FlightSearchResponse(dtos, dtos.size());
+            return applyFlightNumberFilters(dtos, depIata, arrIata, airlineIata, flightStatus, limit);
         }
 
         // Use FIDS for airport-based searches
@@ -54,7 +54,14 @@ public class AerodataboxFlightProvider implements FlightProvider {
             return applyFilters(dtos, depIata, airlineIata, flightStatus, limit);
         }
 
-        // No specific filter — return empty
+        // Status-only or airline-only search without an airport is not supported by AeroDataBox FIDS
+        if ((flightStatus != null && !flightStatus.isBlank())
+                || (airlineIata != null && !airlineIata.isBlank())) {
+            throw new IllegalArgumentException(
+                    "Status and airline filters require an airport code (dep_iata or arr_iata). "
+                            + "AeroDataBox FIDS endpoint requires an airport context to search flights.");
+        }
+
         return new FlightSearchResponse(List.of(), 0);
     }
 
@@ -323,6 +330,42 @@ public class AerodataboxFlightProvider implements FlightProvider {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private FlightSearchResponse applyFlightNumberFilters(List<FlightDto> flights,
+                                                           String depIata, String arrIata,
+                                                           String airlineFilter, String statusFilter,
+                                                           Integer limit) {
+        List<FlightDto> filtered = flights;
+
+        if (depIata != null && !depIata.isBlank()) {
+            String dep = depIata.trim().toUpperCase();
+            filtered = filtered.stream()
+                    .filter(f -> dep.equals(f.departureIata()))
+                    .toList();
+        }
+        if (arrIata != null && !arrIata.isBlank()) {
+            String arr = arrIata.trim().toUpperCase();
+            filtered = filtered.stream()
+                    .filter(f -> arr.equals(f.arrivalIata()))
+                    .toList();
+        }
+        if (airlineFilter != null && !airlineFilter.isBlank()) {
+            String af = airlineFilter.trim().toUpperCase();
+            filtered = filtered.stream()
+                    .filter(f -> af.equals(f.airlineIata()) || af.equals(f.airlineIcao()))
+                    .toList();
+        }
+        if (statusFilter != null && !statusFilter.isBlank()) {
+            String sf = statusFilter.trim().toLowerCase();
+            filtered = filtered.stream()
+                    .filter(f -> sf.equals(f.status()))
+                    .toList();
+        }
+        if (limit != null && limit > 0 && filtered.size() > limit) {
+            filtered = filtered.subList(0, limit);
+        }
+        return new FlightSearchResponse(filtered, filtered.size());
     }
 
     private FlightSearchResponse applyFilters(List<FlightDto> flights, String routeFilter,

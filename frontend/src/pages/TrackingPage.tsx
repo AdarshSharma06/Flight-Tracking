@@ -79,6 +79,10 @@ export function TrackingPage() {
       setSearchError("Enter at least one search filter (flight IATA, departure, arrival, airline, or status).");
       return;
     }
+    if (p.flight_status && !p.flight_iata && !p.dep_iata && !p.arr_iata && !p.airline_iata) {
+      setSearchError("Status filter requires an airport code — enter a departure, arrival, or flight IATA to narrow the search.");
+      return;
+    }
     if (p.dep_iata && !/^[A-Za-z]{3}$/.test(p.dep_iata)) {
       setSearchError("dep_iata must be a 3-letter IATA code.");
       return;

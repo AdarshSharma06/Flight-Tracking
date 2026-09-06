@@ -29,14 +29,10 @@ public class AerodataboxClient {
     // --- Flight Endpoints ---
 
     public List<AerodataboxResponse.FlightContract> getFlightByNumber(String flightNumber) {
-        String today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
-        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(properties.baseUrl())
-                .path("/flights/number/{flightNumber}/{date}")
-                .queryParam("withLocation", true);
-
-        URI uri = URI.create(builder.buildAndExpand(flightNumber, today).toUriString());
-        AerodataboxResponse.FlightContract[] response = executeGet(uri, AerodataboxResponse.FlightContract[].class);
-        return response != null ? List.of(response) : List.of();
+        LocalDate today = LocalDate.now();
+        String dateFrom = today.minusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE);
+        String dateTo = today.plusDays(3).format(DateTimeFormatter.ISO_LOCAL_DATE);
+        return getFlightsByDateRange("number", flightNumber, dateFrom, dateTo);
     }
 
     public List<AerodataboxResponse.FlightContract> getFlightByNumberOnDate(String flightNumber, String date) {
