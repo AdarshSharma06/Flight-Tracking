@@ -11,6 +11,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import com.flighttracking.util.FlightNumberUtils;
+
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -36,7 +38,8 @@ public class AerodataboxFlightProvider implements FlightProvider {
     public FlightSearchResponse searchFlights(String flightIata, String depIata, String arrIata,
                                               String airlineIata, String flightStatus, Integer limit) {
         if (flightIata != null && !flightIata.isBlank()) {
-            List<AerodataboxResponse.FlightContract> flights = client.getFlightByNumber(flightIata);
+            String normalizedIata = FlightNumberUtils.normalize(flightIata);
+            List<AerodataboxResponse.FlightContract> flights = client.getFlightByNumber(normalizedIata);
             List<FlightDto> dtos = flights.stream()
                     .map(this::toDto)
                     .toList();
@@ -73,7 +76,8 @@ public class AerodataboxFlightProvider implements FlightProvider {
 
     @Override
     public FlightDto getFlightByNumber(String flightNumber) {
-        List<AerodataboxResponse.FlightContract> flights = client.getFlightByNumber(flightNumber);
+        String normalized = FlightNumberUtils.normalize(flightNumber);
+        List<AerodataboxResponse.FlightContract> flights = client.getFlightByNumber(normalized);
         if (flights.isEmpty()) {
             throw new ResourceNotFoundException("Flight not found: " + flightNumber);
         }
@@ -83,7 +87,8 @@ public class AerodataboxFlightProvider implements FlightProvider {
 
     @Override
     public FlightTrackingDto getFlightTracking(String flightNumber) {
-        List<AerodataboxResponse.FlightContract> flights = client.getFlightByNumber(flightNumber);
+        String normalized = FlightNumberUtils.normalize(flightNumber);
+        List<AerodataboxResponse.FlightContract> flights = client.getFlightByNumber(normalized);
         if (flights.isEmpty()) {
             log.info("LIVE_DIAG aerodatabox flight={} records=0 reason=no_records", flightNumber);
             throw new ResourceNotFoundException("Flight not found: " + flightNumber);

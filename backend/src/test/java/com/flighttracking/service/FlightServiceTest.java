@@ -199,4 +199,51 @@ class FlightServiceTest {
         assertThat(result.longitude()).isEqualTo(77.0);
         assertThat(result.altitude()).isEqualTo(10000.0);
     }
+
+    // --- Flight number whitespace normalization (6E 589 → 6E589) ---
+
+    @Test
+    void getTracking_normalizesWhitespaceBeforeProviderCall() {
+        FlightTrackingDto commercial = sampleTrackingDto("6E589", "A12345", "IGO589");
+        when(flightProvider.getFlightTracking("6E589")).thenReturn(commercial);
+        when(trackingProvider.getByIcao24("A12345")).thenReturn(Optional.empty());
+        when(trackingProvider.getByCallsign("IGO589")).thenReturn(Optional.empty());
+
+        service.getTracking("6E 589");
+        verify(flightProvider).getFlightTracking("6E589");
+
+        service.getTracking(" 6e 589 ");
+        verify(flightProvider, times(2)).getFlightTracking("6E589");
+
+        service.getTracking("6E589");
+        verify(flightProvider, times(3)).getFlightTracking("6E589");
+    }
+
+    @Test
+    void getByFlightNumber_normalizesWhitespace() {
+        when(flightProvider.getFlightByNumber("6E589")).thenReturn(sampleDto("6E589", "DEL", "JFK"));
+
+        service.getByFlightNumber("6E 589");
+        verify(flightProvider).getFlightByNumber("6E589");
+    }
+
+    @Test
+    void search_normalizesFlightIataWithSpaces() {
+        FlightSearchResponse mockResp = new FlightSearchResponse(List.of(sampleDto("6E589", "DEL", "JFK")), 1);
+        when(flightProvider.searchFlights(eq("6E589"), any(), any(), any(), any(), any())).thenReturn(mockResp);
+
+        service.search("6E 589", null, null, null, null, null);
+        verify(flightProvider).searchFlights(eq("6E589"), any(), any(), any(), any(), any());
+
+        service.search(" 6e 589 ", null, null, null, null, null);
+        verify(flightProvider, times(2)).searchFlights(eq("6E589"), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void search_preservesNormalFlightNumbersUnchanged() {
+        FlightSearchResponse mockResp = new FlightSearchResponse(List.of(sampleDto("AI1745", "DEL", "JFK")), 1);
+        when(flightProvider.searchFlights(eq("AI1745"), any(), any(), any(), any(), any())).thenReturn(mockResp);
+        service.search("AI1745", null, null, null, null, null);
+        verify(flightProvider).searchFlights(eq("AI1745"), any(), any(), any(), any(), any());
+    }
 }

@@ -10,6 +10,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import com.flighttracking.util.FlightNumberUtils;
+
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -40,8 +42,9 @@ public class FlightService {
         if (limit != null && (limit < 1 || limit > 100)) {
             throw new IllegalArgumentException("limit must be between 1 and 100");
         }
+        String normalizedFlightIata = FlightNumberUtils.normalize(flightIata);
         FlightSearchResponse response = flightProvider.searchFlights(
-                flightIata, depIata, arrIata, airlineIata, flightStatus, limit
+                normalizedFlightIata, depIata, arrIata, airlineIata, flightStatus, limit
         );
         List<FlightDto> flights = response.flights();
 
@@ -72,7 +75,7 @@ public class FlightService {
         if (flightNumber == null || flightNumber.isBlank()) {
             throw new IllegalArgumentException("flightNumber must not be blank");
         }
-        String normalized = flightNumber.trim().toUpperCase();
+        String normalized = FlightNumberUtils.normalize(flightNumber);
         return flightProvider.getFlightByNumber(normalized);
     }
 
@@ -80,7 +83,7 @@ public class FlightService {
         if (flightNumber == null || flightNumber.isBlank()) {
             throw new IllegalArgumentException("flightNumber must not be blank");
         }
-        String normalized = flightNumber.trim().toUpperCase();
+        String normalized = FlightNumberUtils.normalize(flightNumber);
 
         // Get commercial flight data from AeroDataBox
         FlightTrackingDto commercial = flightProvider.getFlightTracking(normalized);

@@ -431,14 +431,56 @@ class AerodataboxFlightProviderTest {
                 "IX 1067", AerodataboxResponse.FlightStatus.EnRoute,
                 "AXB1067", "80162d", sampleLocation(),
                 utcTime("2026-09-06T06:00:00Z"), utcTime("2026-09-06T06:15:00Z"));
-        when(client.getFlightByNumber("IX 1067")).thenReturn(List.of(landed, active));
+        when(client.getFlightByNumber("IX1067")).thenReturn(List.of(landed, active));
 
         // Previously this would return landed (flights.get(0)). Now it should return active.
         // Note: getFlightTracking is a @Override method that returns FlightTrackingDto
+        // Input with space should normalize to IX1067
         var result = provider.getFlightTracking("IX 1067");
         assertThat(result.flightIcao()).isEqualTo("AXB1067");
         assertThat(result.aircraftIcao()).isEqualTo("80162d");
         assertThat(result.latitude()).isEqualTo(27.2);
         assertThat(result.longitude()).isEqualTo(79.9);
+    }
+
+    // --- Whitespace normalization regression (6E 589 → 6E589) ---
+
+    @Test
+    void searchFlights_normalizesFlightNumberWithSpaces() {
+        AerodataboxResponse.FlightContract f = sampleFlightContract("6E589", "active", "DEL", "BOM");
+        when(client.getFlightByNumber("6E589")).thenReturn(List.of(f));
+
+        provider.searchFlights("6E 589", null, null, null, null, null);
+        verify(client).getFlightByNumber("6E589");
+
+        provider.searchFlights(" 6E 589 ", null, null, null, null, null);
+        verify(client, times(2)).getFlightByNumber("6E589");
+
+        provider.searchFlights("6e 589", null, null, null, null, null);
+        verify(client, times(3)).getFlightByNumber("6E589");
+    }
+
+    @Test
+    void getFlightTracking_normalizesFlightNumberWithSpaces() {
+        AerodataboxResponse.FlightContract f = buildContract(
+                "6E589", AerodataboxResponse.FlightStatus.EnRoute,
+                "IGO589", "abc123", sampleLocation(),
+                utcTime("2026-09-06T06:00:00Z"), utcTime("2026-09-06T06:15:00Z"));
+        when(client.getFlightByNumber("6E589")).thenReturn(List.of(f));
+
+        provider.getFlightTracking("6E 589");
+        verify(client).getFlightByNumber("6E589");
+
+        provider.getFlightTracking(" 6e 589 ");
+        verify(client, times(2)).getFlightByNumber("6E589");
+    }
+
+    @Test
+    void getFlightByNumber_normalizesWhitespace() {
+        AerodataboxResponse.FlightContract f = sampleFlightContract("6E589", "active", "DEL", "BOM");
+        when(client.getFlightByNumber("6E589")).thenReturn(List.of(f));
+
+        provider.getFlightByNumber("6E 589");
+        verify(client).getFlightByNumber("6E589");
     }
 }

@@ -108,4 +108,20 @@ class AerodataboxClientTest {
         assertThat(dateTo).isEqualTo(today.plusDays(3));
         assertThat(dateTo).isAfter(dateFrom);
     }
+
+    @Test
+    void getFlightByNumber_normalizesWhitespaceBeforeSingleDayCall() {
+        AerodataboxClient spyClient = spy(client);
+        LocalDate today = LocalDate.now();
+        String todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE);
+
+        AerodataboxResponse.FlightContract mockFlight = mock(AerodataboxResponse.FlightContract.class);
+        doReturn(List.of(mockFlight)).when(spyClient).getFlightByNumberOnDate("6E589", todayStr);
+
+        spyClient.getFlightByNumber("6E 589");
+        verify(spyClient).getFlightByNumberOnDate("6E589", todayStr);
+
+        spyClient.getFlightByNumber(" 6e 589 ");
+        verify(spyClient, times(2)).getFlightByNumberOnDate("6E589", todayStr);
+    }
 }

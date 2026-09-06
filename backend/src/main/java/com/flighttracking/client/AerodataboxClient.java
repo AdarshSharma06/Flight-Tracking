@@ -13,6 +13,8 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
+import com.flighttracking.util.FlightNumberUtils;
+
 @Component
 public class AerodataboxClient {
 
@@ -29,11 +31,12 @@ public class AerodataboxClient {
     // --- Flight Endpoints ---
 
     public List<AerodataboxResponse.FlightContract> getFlightByNumber(String flightNumber) {
+        String normalized = FlightNumberUtils.normalize(flightNumber);
         LocalDate today = LocalDate.now();
         String todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE);
 
         // Single-day endpoint supports withLocation=true — use it for today to get live position data
-        List<AerodataboxResponse.FlightContract> todayFlights = getFlightByNumberOnDate(flightNumber, todayStr);
+        List<AerodataboxResponse.FlightContract> todayFlights = getFlightByNumberOnDate(normalized, todayStr);
         if (!todayFlights.isEmpty()) {
             return todayFlights;
         }
@@ -41,25 +44,27 @@ public class AerodataboxClient {
         // Fallback to date-range for flights on other days (yesterday, tomorrow, etc.)
         String dateFrom = today.minusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE);
         String dateTo = today.plusDays(3).format(DateTimeFormatter.ISO_LOCAL_DATE);
-        return getFlightsByDateRange("number", flightNumber, dateFrom, dateTo);
+        return getFlightsByDateRange("number", normalized, dateFrom, dateTo);
     }
 
     public List<AerodataboxResponse.FlightContract> getFlightByNumberOnDate(String flightNumber, String date) {
+        String normalized = FlightNumberUtils.normalize(flightNumber);
         UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(properties.baseUrl())
                 .path("/flights/number/{flightNumber}/{date}")
                 .queryParam("withLocation", true);
 
-        URI uri = URI.create(builder.buildAndExpand(flightNumber, date).toUriString());
+        URI uri = builder.buildAndExpand(normalized, date).encode().toUri();
         AerodataboxResponse.FlightContract[] response = executeGet(uri, AerodataboxResponse.FlightContract[].class);
         return response != null ? List.of(response) : List.of();
     }
 
     public List<AerodataboxResponse.FlightContract> getFlightsByDateRange(String searchBy, String searchParam,
                                                                            String dateFrom, String dateTo) {
+        String normalizedParam = "number".equalsIgnoreCase(searchBy) ? FlightNumberUtils.normalize(searchParam) : searchParam;
         UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(properties.baseUrl())
                 .path("/flights/{searchBy}/{searchParam}/{dateFrom}/{dateTo}");
 
-        URI uri = URI.create(builder.buildAndExpand(searchBy, searchParam, dateFrom, dateTo).toUriString());
+        URI uri = builder.buildAndExpand(searchBy, normalizedParam, dateFrom, dateTo).encode().toUri();
         AerodataboxResponse.FlightContract[] response = executeGet(uri, AerodataboxResponse.FlightContract[].class);
         return response != null ? List.of(response) : List.of();
     }
@@ -83,7 +88,7 @@ public class AerodataboxClient {
             builder.queryParam("direction", direction);
         }
 
-        URI uri = URI.create(builder.buildAndExpand(iataCode).toUriString());
+        URI uri = builder.buildAndExpand(iataCode).encode().toUri();
         return executeGet(uri, AerodataboxResponse.AirportFidsContract.class);
     }
 
@@ -93,7 +98,7 @@ public class AerodataboxClient {
         UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(properties.baseUrl())
                 .path("/airports/iata/{code}");
 
-        URI uri = URI.create(builder.buildAndExpand(iataCode).toUriString());
+        URI uri = builder.buildAndExpand(iataCode).encode().toUri();
         return executeGet(uri, AerodataboxResponse.AirportContract.class);
     }
 
