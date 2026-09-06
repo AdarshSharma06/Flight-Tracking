@@ -85,9 +85,19 @@ public class AerodataboxFlightProvider implements FlightProvider {
     public FlightTrackingDto getFlightTracking(String flightNumber) {
         List<AerodataboxResponse.FlightContract> flights = client.getFlightByNumber(flightNumber);
         if (flights.isEmpty()) {
+            log.info("LIVE_DIAG aerodatabox flight={} records=0 reason=no_records", flightNumber);
             throw new ResourceNotFoundException("Flight not found: " + flightNumber);
         }
-        return toTrackingDto(selectBestRecord(flights));
+        AerodataboxResponse.FlightContract selected = selectBestRecord(flights);
+        String status = selected.status() != null ? selected.status().name() : "null";
+        String selNumber = selected.number();
+        String selCallsign = selected.callSign();
+        String selModeS = selected.aircraft() != null ? selected.aircraft().modeS() : null;
+        boolean hasLocation = selected.location() != null;
+        Double lat = selected.location() != null ? selected.location().lat() : null;
+        Double lon = selected.location() != null ? selected.location().lon() : null;
+        log.info("LIVE_DIAG aerodatabox flight={} records={} selectedStatus={} selectedNumber={} selectedCallsign={} selectedModeS={} hasLocation={} latitude={} longitude={}", flightNumber, flights.size(), status, selNumber, selCallsign, selModeS, hasLocation, lat, lon);
+        return toTrackingDto(selected);
     }
 
     @Override

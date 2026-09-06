@@ -32,31 +32,71 @@ public class OpenSkyClient implements TrackingProvider {
 
     @Override
     public Optional<LiveTrackingData> getByIcao24(String icao24) {
-        if (icao24 == null || icao24.isBlank()) return Optional.empty();
+        if (icao24 == null || icao24.isBlank()) {
+            log.info("OPEN_SKY_DIAG lookup=icao24 identifier={} result=skipped reason=blank", icao24);
+            return Optional.empty();
+        }
+        String norm = icao24.trim().toLowerCase();
+        log.info("OPEN_SKY_DIAG lookup=icao24 identifier={} endpoint=/states/all", norm);
         requireCredentials();
-        return fetchStates(icao24.trim().toLowerCase())
-                .map(this::mapStateToTracking);
+        Optional<Map<String, Object>> raw = fetchStates(norm);
+        if (raw.isEmpty()) {
+            log.info("OPEN_SKY_DIAG lookup=icao24 identifier={} result=empty", norm);
+            return Optional.empty();
+        }
+        try {
+            LiveTrackingData mapped = mapStateToTracking(raw.get());
+            log.info("OPEN_SKY_DIAG lookup=icao24 identifier={} parsed latitude={} longitude={} altitude={} velocity={} track={} verticalRate={} geoAltitude={} onGround={}", norm, mapped.latitude(), mapped.longitude(), mapped.baroAltitude(), mapped.velocity(), mapped.trueTrack(), mapped.verticalRate(), mapped.geoAltitude(), mapped.onGround());
+            return Optional.of(mapped);
+        } catch (Exception e) {
+            log.warn("OPEN_SKY_DIAG lookup=icao24 identifier={} parse_failure type={} message={}", norm, e.getClass().getSimpleName(), e.getMessage());
+            return Optional.empty();
+        }
     }
 
     @Override
     public Optional<LiveTrackingData> getByCallsign(String callsign) {
-        if (callsign == null || callsign.isBlank()) return Optional.empty();
+        if (callsign == null || callsign.isBlank()) {
+            log.info("OPEN_SKY_DIAG lookup=callsign identifier={} result=skipped reason=blank", callsign);
+            return Optional.empty();
+        }
+        String norm = callsign.trim().toUpperCase();
+        log.info("OPEN_SKY_DIAG lookup=callsign identifier={} endpoint=/states/all", norm);
         requireCredentials();
         try {
             Map<String, Object> response = restClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/states/all")
-                            .queryParam("callsign", callsign.trim().toUpperCase())
+                            .queryParam("callsign", norm)
                             .build())
                     .headers(h -> h.setBearerAuth(getOrRefreshToken()))
                     .retrieve()
                     .body(Map.class);
-            if (response == null) return Optional.empty();
-            return extractFirstState(response)
-                    .map(this::mapStateToTracking);
+            if (response == null) {
+                log.info("OPEN_SKY_DIAG lookup=callsign identifier={} http_status=200 state_count=0 reason=response_null", norm);
+                return Optional.empty();
+            }
+            Object statesObj = response.get("states");
+            int count = statesObj instanceof java.util.List<?> l ? l.size() : 0;
+            log.info("OPEN_SKY_DIAG lookup=callsign identifier={} http_status=200 state_count={}", norm, count);
+            Optional<Map<String, Object>> first = extractFirstState(response);
+            if (first.isEmpty()) {
+                log.info("OPEN_SKY_DIAG lookup=callsign identifier={} result=empty after_extract", norm);
+                return Optional.empty();
+            }
+            try {
+                LiveTrackingData mapped = mapStateToTracking(first.get());
+                log.info("OPEN_SKY_DIAG lookup=callsign identifier={} parsed latitude={} longitude={} altitude={} velocity={} track={} verticalRate={} geoAltitude={} onGround={}", norm, mapped.latitude(), mapped.longitude(), mapped.baroAltitude(), mapped.velocity(), mapped.trueTrack(), mapped.verticalRate(), mapped.geoAltitude(), mapped.onGround());
+                return Optional.of(mapped);
+            } catch (Exception e) {
+                log.warn("OPEN_SKY_DIAG lookup=callsign identifier={} parse_failure type={} message={}", norm, e.getClass().getSimpleName(), e.getMessage());
+                return Optional.empty();
+            }
         } catch (ExternalApiException e) {
+            log.warn("OPEN_SKY_DIAG lookup=callsign identifier={} http_status={} error={}", norm, e.getStatus(), e.getMessage());
             throw e;
         } catch (Exception e) {
+            log.warn("OPEN_SKY_DIAG lookup=callsign identifier={} exception={} message={}", norm, e.getClass().getSimpleName(), e.getMessage());
             log.warn("OpenSky callsign lookup failed for {}: {}", callsign, e.getMessage());
             return Optional.empty();
         }
@@ -72,11 +112,19 @@ public class OpenSkyClient implements TrackingProvider {
                     .headers(h -> h.setBearerAuth(getOrRefreshToken()))
                     .retrieve()
                     .body(Map.class);
-            if (response == null) return Optional.empty();
+            if (response == null) {
+                log.info("OPEN_SKY_DIAG lookup=icao24 identifier={} http_status=200 state_count=0 reason=response_null", icao24);
+                return Optional.empty();
+            }
+            Object statesObj = response.get("states");
+            int count = statesObj instanceof java.util.List<?> l ? l.size() : 0;
+            log.info("OPEN_SKY_DIAG lookup=icao24 identifier={} http_status=200 state_count={}", icao24, count);
             return extractFirstState(response);
         } catch (ExternalApiException e) {
+            log.warn("OPEN_SKY_DIAG lookup=icao24 identifier={} http_status={} error={}", icao24, e.getStatus(), e.getMessage());
             throw e;
         } catch (Exception e) {
+            log.warn("OPEN_SKY_DIAG lookup=icao24 identifier={} exception={} message={}", icao24, e.getClass().getSimpleName(), e.getMessage());
             log.warn("OpenSky state lookup failed for {}: {}", icao24, e.getMessage());
             return Optional.empty();
         }
@@ -174,6 +222,7 @@ public class OpenSkyClient implements TrackingProvider {
         if (cached != null && Instant.now().isBefore(cached.expiresAt())) {
             return cached.token();
         }
+        log.info("OPEN_SKY_DIAG token_refresh attempt");
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> tokenResponse = restClient.post()
@@ -184,6 +233,7 @@ public class OpenSkyClient implements TrackingProvider {
                     .retrieve()
                     .body(Map.class);
             if (tokenResponse == null) {
+                log.warn("OPEN_SKY_DIAG token_refresh failed reason=response_null");
                 log.error("OpenSky token response was null");
                 return null;
             }
@@ -191,9 +241,11 @@ public class OpenSkyClient implements TrackingProvider {
             Number expiresIn = (Number) tokenResponse.getOrDefault("expires_in", 1800);
             Instant expiresAt = Instant.now().plusSeconds(expiresIn.longValue() - 30);
             tokenCache.set(new CachedToken(token, expiresAt));
+            log.info("OPEN_SKY_DIAG token_refresh success expires_in={}", expiresIn);
             log.debug("OpenSky OAuth2 token refreshed, valid for {}s", expiresIn);
             return token;
         } catch (Exception e) {
+            log.warn("OPEN_SKY_DIAG token_refresh failed type={} message={}", e.getClass().getSimpleName(), e.getMessage());
             log.error("Failed to refresh OpenSky OAuth2 token: {}", e.getMessage());
             return null;
         }

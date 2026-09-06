@@ -97,27 +97,56 @@ public class FlightService {
     }
 
     private Optional<TrackingProvider.LiveTrackingData> resolveLiveData(FlightTrackingDto commercial) {
+        String flight = commercial.flightNumber();
+        String aircraftIcao = commercial.aircraftIcao();
+        String flightIcao = commercial.flightIcao();
+        boolean hasAircraftIcao = aircraftIcao != null && !aircraftIcao.isBlank();
+        boolean hasFlightIcao = flightIcao != null && !flightIcao.isBlank();
+        log.info("LIVE_DIAG flight={} aircraftIcao={} flightIcao={} hasAircraftIcao={} hasFlightIcao={}", flight, aircraftIcao, flightIcao, hasAircraftIcao, hasFlightIcao);
         try {
             // 1. ICAO24 / Mode-S hex — most reliable, direct OpenSky key
-            if (commercial.aircraftIcao() != null && !commercial.aircraftIcao().isBlank()) {
-                Optional<TrackingProvider.LiveTrackingData> data =
-                        trackingProvider.getByIcao24(commercial.aircraftIcao().trim());
-                if (data.isPresent()) return data;
+            if (hasAircraftIcao) {
+                String id = aircraftIcao.trim();
+                log.info("LIVE_DIAG flight={} attempting_open_sky_lookup=icao24 identifier={}", flight, id);
+                Optional<TrackingProvider.LiveTrackingData> data = trackingProvider.getByIcao24(id);
+                if (data.isPresent()) {
+                    TrackingProvider.LiveTrackingData d = data.get();
+                    log.info("LIVE_DIAG flight={} opensky_icao24_success latitude={} longitude={} altitude={} velocity={} track={} onGround={}", flight, d.latitude(), d.longitude(), d.baroAltitude(), d.velocity(), d.trueTrack(), d.onGround());
+                    log.info("LIVE_DIAG flight={} live_data_obtained source=icao24 latitude={} longitude={}", flight, d.latitude(), d.longitude());
+                    return data;
+                } else {
+                    log.info("LIVE_DIAG flight={} opensky_icao24_empty identifier={}", flight, id);
+                }
+            } else {
+                log.info("LIVE_DIAG flight={} skipping_icao24_lookup reason=aircraftIcao_missing_or_blank", flight);
             }
 
             // 2. ICAO callsign (e.g., IGO123) — may match OpenSky callsign field
-            if (commercial.flightIcao() != null && !commercial.flightIcao().isBlank()) {
-                Optional<TrackingProvider.LiveTrackingData> data =
-                        trackingProvider.getByCallsign(commercial.flightIcao().trim());
-                if (data.isPresent()) return data;
+            if (hasFlightIcao) {
+                String id = flightIcao.trim();
+                log.info("LIVE_DIAG flight={} attempting_open_sky_lookup=callsign identifier={}", flight, id);
+                Optional<TrackingProvider.LiveTrackingData> data = trackingProvider.getByCallsign(id);
+                if (data.isPresent()) {
+                    TrackingProvider.LiveTrackingData d = data.get();
+                    log.info("LIVE_DIAG flight={} opensky_callsign_success latitude={} longitude={} altitude={} velocity={} track={} onGround={}", flight, d.latitude(), d.longitude(), d.baroAltitude(), d.velocity(), d.trueTrack(), d.onGround());
+                    log.info("LIVE_DIAG flight={} live_data_obtained source=callsign latitude={} longitude={}", flight, d.latitude(), d.longitude());
+                    return data;
+                } else {
+                    log.info("LIVE_DIAG flight={} opensky_callsign_empty identifier={}", flight, id);
+                }
+            } else {
+                log.info("LIVE_DIAG flight={} skipping_callsign_lookup reason=flightIcao_missing_or_blank", flight);
             }
         } catch (Exception e) {
-            log.warn("Live telemetry enrichment failed for flight {}: {}", commercial.flightNumber(), e.getMessage());
+            log.warn("LIVE_DIAG flight={} live_data_unavailable reason=exception type={} message={}", flight, e.getClass().getSimpleName(), e.getMessage());
+            log.warn("Live telemetry enrichment failed for flight {}: {}", flight, e.getMessage());
         }
 
         // Do NOT use flightIata (IATA number, e.g. 6E123) as an OpenSky callsign.
         // OpenSky callsigns are ICAO-format (e.g., IGO123), not IATA.
 
+        String reason = (!hasAircraftIcao && !hasFlightIcao) ? "both_identifiers_missing" : "both_lookups_empty_or_failed";
+        log.info("LIVE_DIAG flight={} live_data_unavailable reason={}", flight, reason);
         return Optional.empty();
     }
 
