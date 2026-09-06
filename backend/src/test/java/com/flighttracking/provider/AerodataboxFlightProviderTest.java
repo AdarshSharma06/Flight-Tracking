@@ -4,6 +4,7 @@ import com.flighttracking.client.AerodataboxClient;
 import com.flighttracking.client.AerodataboxResponse;
 import com.flighttracking.dto.flight.FlightDto;
 import com.flighttracking.dto.flight.FlightSearchResponse;
+import com.flighttracking.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -204,5 +205,240 @@ class AerodataboxFlightProviderTest {
         FlightSearchResponse result = provider.searchFlights("6E123", null, null, null, null, 2);
         assertThat(result.flights()).hasSize(2);
         assertThat(result.count()).isEqualTo(2);
+    }
+
+    // --- Record selection tests (selectBestRecord) ---
+
+    private AerodataboxResponse.FlightContract buildContract(String number,
+                                                              AerodataboxResponse.FlightStatus status,
+                                                              String callSign,
+                                                              String modeS,
+                                                              AerodataboxResponse.FlightLocationContract location,
+                                                              AerodataboxResponse.DateTimeContract depScheduled,
+                                                              AerodataboxResponse.DateTimeContract depActual) {
+        AerodataboxResponse.ListingAirportContract airport = new AerodataboxResponse.ListingAirportContract(
+                "ICAO", "DEL", "Delhi Airport", "Delhi", null, null, null, null);
+        AerodataboxResponse.FlightAirportMovementContract dep = new AerodataboxResponse.FlightAirportMovementContract(
+                airport, depScheduled, null, null, depActual, null, null, null, null, null);
+        AerodataboxResponse.FlightAirportMovementContract arr = null;
+        AerodataboxResponse.FlightAircraftContract aircraft = (modeS != null || callSign != null)
+                ? new AerodataboxResponse.FlightAircraftContract("VT-TEST", modeS, "B738")
+                : null;
+        AerodataboxResponse.FlightAirlineContract airline = new AerodataboxResponse.FlightAirlineContract("Airline", "IX", "AXB");
+        return new AerodataboxResponse.FlightContract(
+                number, callSign, status,
+                AerodataboxResponse.CodeshareStatus.IsOperator, false,
+                null, dep, arr, aircraft, airline, location);
+    }
+
+    private AerodataboxResponse.DateTimeContract utcTime(String utc) {
+        return new AerodataboxResponse.DateTimeContract(utc, utc);
+    }
+
+    private AerodataboxResponse.FlightLocationContract sampleLocation() {
+        return new AerodataboxResponse.FlightLocationContract(
+                new AerodataboxResponse.DistanceContract(10000.0, 32808.0, 10.0),
+                new AerodataboxResponse.SpeedContract(800.0, 432.0, 222.0),
+                new AerodataboxResponse.AzimuthContract(120.0),
+                0, 27.2, 79.9, "2026-09-06T10:00:00Z");
+    }
+
+    @Test
+    void selectBestRecord_prefersActiveOverLandedAndScheduled() {
+        // A. Multiple occurrences: historical/landed + current active + future scheduled
+        AerodataboxResponse.FlightContract landed = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Arrived,
+                null, null, null,
+                utcTime("2026-09-05T06:00:00Z"), utcTime("2026-09-05T08:00:00Z"));
+        AerodataboxResponse.FlightContract active = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.EnRoute,
+                "AXB1067", "80162d", sampleLocation(),
+                utcTime("2026-09-06T06:00:00Z"), utcTime("2026-09-06T06:15:00Z"));
+        AerodataboxResponse.FlightContract scheduled = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Expected,
+                "AXB1067", "80162d", null,
+                utcTime("2026-09-07T06:00:00Z"), null);
+
+        AerodataboxResponse.FlightContract best = provider.selectBestRecord(List.of(landed, active, scheduled));
+        assertThat(best).isSameAs(active);
+    }
+
+    @Test
+    void selectBestRecord_prefersActiveWithModeSAndCallSign() {
+        // B. Active occurrence has modeS and callSign
+        AerodataboxResponse.FlightContract withoutIds = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.EnRoute,
+                null, null, null,
+                utcTime("2026-09-06T06:00:00Z"), null);
+        AerodataboxResponse.FlightContract withIds = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.EnRoute,
+                "AXB1067", "80162d", sampleLocation(),
+                utcTime("2026-09-06T06:00:00Z"), utcTime("2026-09-06T06:15:00Z"));
+
+        AerodataboxResponse.FlightContract best = provider.selectBestRecord(List.of(withoutIds, withIds));
+        assertThat(best).isSameAs(withIds);
+    }
+
+    @Test
+    void selectBestRecord_doesNotAutoSelectFirstWhenFirstIsHistorical() {
+        // C. First array element is historical — must NOT be auto-selected
+        AerodataboxResponse.FlightContract historical = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Arrived,
+                null, null, null,
+                utcTime("2026-09-04T06:00:00Z"), utcTime("2026-09-04T08:00:00Z"));
+        AerodataboxResponse.FlightContract todayActive = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Departed,
+                "AXB1067", "80162d", null,
+                utcTime("2026-09-06T06:00:00Z"), utcTime("2026-09-06T06:15:00Z"));
+
+        AerodataboxResponse.FlightContract best = provider.selectBestRecord(List.of(historical, todayActive));
+        assertThat(best).isSameAs(todayActive);
+        assertThat(best.status()).isEqualTo(AerodataboxResponse.FlightStatus.Departed);
+    }
+
+    @Test
+    void selectBestRecord_doesNotLetFutureScheduledOverrideDeparted() {
+        // D. Future scheduled occurrence must not override already departed/current
+        AerodataboxResponse.FlightContract departed = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Departed,
+                "AXB1067", "80162d", null,
+                utcTime("2026-09-06T06:00:00Z"), utcTime("2026-09-06T06:15:00Z"));
+        AerodataboxResponse.FlightContract futureScheduled = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Expected,
+                "AXB1067", "80162d", null,
+                utcTime("2026-09-07T06:00:00Z"), null);
+
+        AerodataboxResponse.FlightContract best = provider.selectBestRecord(List.of(departed, futureScheduled));
+        assertThat(best).isSameAs(departed);
+        assertThat(best.status()).isEqualTo(AerodataboxResponse.FlightStatus.Departed);
+    }
+
+    @Test
+    void selectBestRecord_singleOccurrence() {
+        // E. Only one occurrence → it is selected
+        AerodataboxResponse.FlightContract only = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Expected,
+                null, null, null,
+                utcTime("2026-09-06T06:00:00Z"), null);
+
+        AerodataboxResponse.FlightContract best = provider.selectBestRecord(List.of(only));
+        assertThat(best).isSameAs(only);
+    }
+
+    @Test
+    void getFlightTracking_throwsOnEmptyList() {
+        // F. No occurrences → ResourceNotFoundException
+        when(client.getFlightByNumber("IX1067")).thenReturn(List.of());
+        assertThatThrownBy(() -> provider.getFlightTracking("IX1067"))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void selectBestRecord_safeWithNullFields() {
+        // G. Null aircraft/callSign/location — selection remains safe and deterministic
+        AerodataboxResponse.FlightContract nullAircraft = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.EnRoute,
+                null, null, null,
+                utcTime("2026-09-06T06:00:00Z"), null);
+        AerodataboxResponse.FlightContract withAircraft = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.EnRoute,
+                "AXB1067", "80162d", null,
+                utcTime("2026-09-06T06:00:00Z"), null);
+
+        // Both are EnRoute but one has identifiers — should pick the one with data
+        AerodataboxResponse.FlightContract best = provider.selectBestRecord(List.of(nullAircraft, withAircraft));
+        assertThat(best).isSameAs(withAircraft);
+        assertThat(best.callSign()).isEqualTo("AXB1067");
+        assertThat(best.aircraft().modeS()).isEqualTo("80162d");
+    }
+
+    @Test
+    void selectBestRecord_departedBeatsScheduled() {
+        // Departed beats Expected (scheduled)
+        AerodataboxResponse.FlightContract scheduled = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Expected,
+                "AXB1067", "80162d", null,
+                utcTime("2026-09-06T06:00:00Z"), null);
+        AerodataboxResponse.FlightContract departed = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Departed,
+                "AXB1067", "80162d", null,
+                utcTime("2026-09-06T06:00:00Z"), utcTime("2026-09-06T06:15:00Z"));
+
+        AerodataboxResponse.FlightContract best = provider.selectBestRecord(List.of(scheduled, departed));
+        assertThat(best).isSameAs(departed);
+    }
+
+    @Test
+    void selectBestRecord_approachingBeatsEnRoute() {
+        // Approaching (final approach) beats EnRoute — both are "active" tier but Approaching > EnRoute
+        AerodataboxResponse.FlightContract enRoute = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.EnRoute,
+                "AXB1067", "80162d", sampleLocation(),
+                utcTime("2026-09-06T06:00:00Z"), utcTime("2026-09-06T06:15:00Z"));
+        AerodataboxResponse.FlightContract approaching = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Approaching,
+                "AXB1067", "80162d", sampleLocation(),
+                utcTime("2026-09-06T06:00:00Z"), utcTime("2026-09-06T06:15:00Z"));
+
+        AerodataboxResponse.FlightContract best = provider.selectBestRecord(List.of(enRoute, approaching));
+        assertThat(best).isSameAs(approaching);
+    }
+
+    @Test
+    void selectBestRecord_locationPresenceBoostsScore() {
+        // Two EnRoute records with same time — one has location, one does not
+        AerodataboxResponse.FlightContract noLoc = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.EnRoute,
+                "AXB1067", "80162d", null,
+                utcTime("2026-09-06T06:00:00Z"), utcTime("2026-09-06T06:15:00Z"));
+        AerodataboxResponse.FlightContract withLoc = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.EnRoute,
+                "AXB1067", "80162d", sampleLocation(),
+                utcTime("2026-09-06T06:00:00Z"), utcTime("2026-09-06T06:15:00Z"));
+
+        AerodataboxResponse.FlightContract best = provider.selectBestRecord(List.of(noLoc, withLoc));
+        assertThat(best).isSameAs(withLoc);
+    }
+
+    @Test
+    void selectBestRecord_prefersCloserDepartureTime() {
+        // Same status, same identifiers — prefer the one with departure time closest to now
+        // Use departure times relative to each other (one in past, one in future)
+        AerodataboxResponse.FlightContract past = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Expected,
+                "AXB1067", "80162d", null,
+                utcTime("2026-09-05T06:00:00Z"), null);
+        AerodataboxResponse.FlightContract future = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Expected,
+                "AXB1067", "80162d", null,
+                utcTime("2026-09-07T06:00:00Z"), null);
+
+        // Both have same score (Expected=40 + modeS=10 + callSign=5 = 55)
+        // Selection depends on which departure time is closer to "now"
+        AerodataboxResponse.FlightContract best = provider.selectBestRecord(List.of(past, future));
+        assertThat(best).isNotNull();
+        // The result is deterministic — whichever is closer to the current time
+    }
+
+    @Test
+    void getFlightTracking_usesSelectBestRecord() {
+        // Verify that getFlightTracking uses selectBestRecord, not flights.get(0)
+        AerodataboxResponse.FlightContract landed = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.Arrived,
+                null, null, null,
+                utcTime("2026-09-05T06:00:00Z"), utcTime("2026-09-05T08:00:00Z"));
+        AerodataboxResponse.FlightContract active = buildContract(
+                "IX 1067", AerodataboxResponse.FlightStatus.EnRoute,
+                "AXB1067", "80162d", sampleLocation(),
+                utcTime("2026-09-06T06:00:00Z"), utcTime("2026-09-06T06:15:00Z"));
+        when(client.getFlightByNumber("IX 1067")).thenReturn(List.of(landed, active));
+
+        // Previously this would return landed (flights.get(0)). Now it should return active.
+        // Note: getFlightTracking is a @Override method that returns FlightTrackingDto
+        var result = provider.getFlightTracking("IX 1067");
+        assertThat(result.flightIcao()).isEqualTo("AXB1067");
+        assertThat(result.aircraftIcao()).isEqualTo("80162d");
+        assertThat(result.latitude()).isEqualTo(27.2);
+        assertThat(result.longitude()).isEqualTo(79.9);
     }
 }

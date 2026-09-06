@@ -41,28 +41,55 @@ class AerodataboxClientTest {
     private AerodataboxClient client;
 
     @Test
-    void getFlightByNumberUsesDateRange() {
-        // Verify that getFlightByNumber delegates to getFlightsByDateRange
-        // with the correct date range: yesterday to today+3
+    void getFlightByNumberTriesSingleDayFirstForToday() {
+        // getFlightByNumber should try single-day endpoint (with withLocation) for today first
         AerodataboxClient spyClient = spy(client);
         LocalDate today = LocalDate.now();
+        String todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE);
+
+        AerodataboxResponse.FlightContract mockFlight = mock(AerodataboxResponse.FlightContract.class);
+        doReturn(List.of(mockFlight))
+                .when(spyClient).getFlightByNumberOnDate("6E123", todayStr);
+
+        List<AerodataboxResponse.FlightContract> result = spyClient.getFlightByNumber("6E123");
+
+        // Should call single-day endpoint for today
+        verify(spyClient).getFlightByNumberOnDate("6E123", todayStr);
+        // Should NOT fall back to date-range since single-day returned results
+        verify(spyClient, never()).getFlightsByDateRange(anyString(), anyString(), anyString(), anyString());
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
+    void getFlightByNumberFallsBackToDateTimeRangeWhenSingleDayEmpty() {
+        // When single-day endpoint returns empty, fall back to date-range
+        AerodataboxClient spyClient = spy(client);
+        LocalDate today = LocalDate.now();
+        String todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE);
         String expectedFrom = today.minusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE);
         String expectedTo = today.plusDays(3).format(DateTimeFormatter.ISO_LOCAL_DATE);
 
+        AerodataboxResponse.FlightContract mockFlight = mock(AerodataboxResponse.FlightContract.class);
         doReturn(List.<AerodataboxResponse.FlightContract>of())
+                .when(spyClient).getFlightByNumberOnDate("6E123", todayStr);
+        doReturn(List.of(mockFlight))
                 .when(spyClient).getFlightsByDateRange("number", "6E123", expectedFrom, expectedTo);
 
         List<AerodataboxResponse.FlightContract> result = spyClient.getFlightByNumber("6E123");
 
+        verify(spyClient).getFlightByNumberOnDate("6E123", todayStr);
         verify(spyClient).getFlightsByDateRange("number", "6E123", expectedFrom, expectedTo);
-        assertThat(result).isEmpty();
+        assertThat(result).hasSize(1);
     }
 
     @Test
     void getFlightByNumberDateRangeCoversYesterdayToPlus3() {
         AerodataboxClient spyClient = spy(client);
         LocalDate today = LocalDate.now();
+        String todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE);
 
+        doReturn(List.<AerodataboxResponse.FlightContract>of())
+                .when(spyClient).getFlightByNumberOnDate(anyString(), anyString());
         doReturn(List.<AerodataboxResponse.FlightContract>of())
                 .when(spyClient).getFlightsByDateRange(anyString(), anyString(), anyString(), anyString());
 
@@ -80,19 +107,5 @@ class AerodataboxClientTest {
         assertThat(dateFrom).isEqualTo(today.minusDays(1));
         assertThat(dateTo).isEqualTo(today.plusDays(3));
         assertThat(dateTo).isAfter(dateFrom);
-    }
-
-    @Test
-    void getFlightByNumberDoesNotUseTodayOnly() {
-        // Prove we no longer call the single-day endpoint
-        AerodataboxClient spyClient = spy(client);
-
-        doReturn(List.<AerodataboxResponse.FlightContract>of())
-                .when(spyClient).getFlightsByDateRange(anyString(), anyString(), anyString(), anyString());
-
-        spyClient.getFlightByNumber("BA2490");
-
-        // Verify getFlightsByDateRange was called (not a single-day endpoint)
-        verify(spyClient).getFlightsByDateRange(eq("number"), eq("BA2490"), anyString(), anyString());
     }
 }

@@ -11,9 +11,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Component
 public class AerodataboxFlightProvider implements FlightProvider {
@@ -81,7 +87,7 @@ public class AerodataboxFlightProvider implements FlightProvider {
         if (flights.isEmpty()) {
             throw new ResourceNotFoundException("Flight not found: " + flightNumber);
         }
-        return toTrackingDto(flights.get(0));
+        return toTrackingDto(selectBestRecord(flights));
     }
 
     @Override
@@ -330,6 +336,91 @@ public class AerodataboxFlightProvider implements FlightProvider {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    // --- Record Selection ---
+
+    /**
+     * Selects the most relevant flight record from multiple occurrences.
+     * <p>
+     * When AeroDataBox returns multiple records for the same flight number across a date range,
+     * we must pick the one most likely to represent the currently operating flight.
+     * A historical/landed occurrence must NOT be selected over a currently active one.
+     * A future scheduled occurrence must NOT override an already departed/active occurrence.
+     * <p>
+     * Selection is deterministic and based on:
+     * 1. Status weight (active > departed > scheduled > historical/cancelled)
+     * 2. Data completeness (modeS, callSign, location populated)
+     * 3. Time proximity (departure time closest to now)
+     */
+    AerodataboxResponse.FlightContract selectBestRecord(List<AerodataboxResponse.FlightContract> flights) {
+        if (flights.size() == 1) {
+            return flights.get(0);
+        }
+
+        Map<AerodataboxResponse.FlightContract, Integer> scores = flights.stream()
+                .collect(Collectors.toMap(Function.identity(), this::relevanceScore));
+
+        Instant now = Instant.now();
+
+        return flights.stream()
+                .min(Comparator
+                        .<AerodataboxResponse.FlightContract>comparingInt(f -> -scores.get(f))
+                        .thenComparing(f -> Math.abs(getDepartureInstant(f).map(t -> t.toEpochMilli() - now.toEpochMilli()).orElse(Long.MAX_VALUE)))
+                        .thenComparing(f -> flights.indexOf(f)))
+                .orElse(flights.get(0));
+    }
+
+    private int relevanceScore(AerodataboxResponse.FlightContract f) {
+        int score = 0;
+
+        if (f.status() != null) {
+            score += switch (f.status()) {
+                case Approaching -> 105;
+                case EnRoute -> 100;
+                case Departed -> 90;
+                case Boarding, GateClosed -> 60;
+                case CheckIn -> 50;
+                case Expected, Delayed -> 40;
+                case Arrived, Diverted -> 10;
+                case Canceled, CanceledUncertain -> 5;
+                default -> 20;
+            };
+        }
+
+        if (f.aircraft() != null && f.aircraft().modeS() != null && !f.aircraft().modeS().isBlank()) {
+            score += 10;
+        }
+        if (f.callSign() != null && !f.callSign().isBlank()) {
+            score += 5;
+        }
+        if (f.location() != null) {
+            score += 5;
+        }
+
+        return score;
+    }
+
+    private Optional<Instant> getDepartureInstant(AerodataboxResponse.FlightContract f) {
+        if (f.departure() == null) return Optional.empty();
+
+        // Prefer actual departure time, then revised/estimated, then scheduled
+        String[] candidates = {
+                extractUtcTime(f.departure().runwayTime()),
+                extractUtcTime(f.departure().revisedTime()),
+                extractUtcTime(f.departure().scheduledTime())
+        };
+
+        for (String utc : candidates) {
+            if (utc != null && !utc.isBlank()) {
+                try {
+                    return Optional.of(Instant.parse(utc));
+                } catch (DateTimeParseException e) {
+                    // try next candidate
+                }
+            }
+        }
+        return Optional.empty();
     }
 
     private FlightSearchResponse applyFlightNumberFilters(List<FlightDto> flights,

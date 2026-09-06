@@ -30,6 +30,15 @@ public class AerodataboxClient {
 
     public List<AerodataboxResponse.FlightContract> getFlightByNumber(String flightNumber) {
         LocalDate today = LocalDate.now();
+        String todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE);
+
+        // Single-day endpoint supports withLocation=true — use it for today to get live position data
+        List<AerodataboxResponse.FlightContract> todayFlights = getFlightByNumberOnDate(flightNumber, todayStr);
+        if (!todayFlights.isEmpty()) {
+            return todayFlights;
+        }
+
+        // Fallback to date-range for flights on other days (yesterday, tomorrow, etc.)
         String dateFrom = today.minusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE);
         String dateTo = today.plusDays(3).format(DateTimeFormatter.ISO_LOCAL_DATE);
         return getFlightsByDateRange("number", flightNumber, dateFrom, dateTo);
@@ -67,7 +76,8 @@ public class AerodataboxClient {
                 .queryParam("durationMinutes", durationMinutes)
                 .queryParam("withLeg", true)
                 .queryParam("withCancelled", true)
-                .queryParam("withCodeshared", false);
+                .queryParam("withCodeshared", false)
+                .queryParam("withLocation", true);
 
         if (direction != null) {
             builder.queryParam("direction", direction);
