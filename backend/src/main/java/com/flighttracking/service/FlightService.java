@@ -87,8 +87,8 @@ public class FlightService {
         // Get commercial flight data from AeroDataBox
         FlightTrackingDto commercial = flightProvider.getFlightTracking(normalized);
 
-        // Enrich with live telemetry from AirLabs (single lookup by IATA)
-        Optional<TrackingProvider.LiveTrackingData> liveData = resolveLiveData(normalized);
+        // Enrich with live telemetry from AirLabs (primary + one fallback)
+        Optional<TrackingProvider.LiveTrackingData> liveData = resolveLiveData(commercial, normalized);
 
         if (liveData.isEmpty()) {
             return commercial;
@@ -98,16 +98,78 @@ public class FlightService {
         return mergeTracking(commercial, liveData.get());
     }
 
-    private Optional<TrackingProvider.LiveTrackingData> resolveLiveData(String normalizedFlightIata) {
-        if (normalizedFlightIata == null || normalizedFlightIata.isBlank()) return Optional.empty();
+    private Optional<TrackingProvider.LiveTrackingData> resolveLiveData(FlightTrackingDto commercial, String normalizedFlightIata) {
+        String flightForLog = normalizedFlightIata != null ? normalizedFlightIata : commercial.flightNumber();
         try {
-            // Single AirLabs lookup by normalized IATA flight number (e.g., 6E6706)
-            // One tracking request -> at most one AirLabs call (free tier)
-            return trackingProvider.getByFlightIata(normalizedFlightIata);
+            // PRIMARY: single AirLabs lookup by normalized IATA (e.g., 6E6706)
+            Optional<TrackingProvider.LiveTrackingData> primary = trackingProvider.getByFlightIata(normalizedFlightIata);
+            if (primary.isPresent() && isUsable(primary.get())) {
+                log.info("AIRLABS_TRACKING flight={} lookup=PRIMARY_IATA result=LIVE_POSITION_FOUND", flightForLog);
+                return primary;
+            }
+            if (primary.isPresent()) {
+                log.info("AIRLABS_TRACKING flight={} lookup=PRIMARY_IATA result=NO_LIVE_POSITION reason=invalid_coordinates", flightForLog);
+            } else {
+                log.info("AIRLABS_TRACKING flight={} lookup=PRIMARY_IATA result=NO_LIVE_POSITION records=0", flightForLog);
+            }
+
+            // FALLBACK: one additional lookup using aircraft identifier from AeroDataBox
+            // Priority: registration → flight ICAO → hex
+            String reg = commercial.aircraftRegistration();
+            if (reg != null && !reg.isBlank()) {
+                String id = reg.trim();
+                log.info("AIRLABS_TRACKING flight={} lookup=FALLBACK_REGISTRATION identifier={}", flightForLog, id);
+                Optional<TrackingProvider.LiveTrackingData> fb = trackingProvider.getByRegistration(id);
+                if (fb.isPresent() && isUsable(fb.get())) {
+                    log.info("AIRLABS_TRACKING flight={} lookup=FALLBACK_REGISTRATION result=LIVE_POSITION_FOUND", flightForLog);
+                    return fb;
+                }
+                log.info("AIRLABS_TRACKING flight={} lookup=FALLBACK_REGISTRATION result=NO_LIVE_POSITION", flightForLog);
+                return Optional.empty();
+            }
+
+            String flightIcao = commercial.flightIcao();
+            if (flightIcao != null && !flightIcao.isBlank()) {
+                String id = flightIcao.trim();
+                log.info("AIRLABS_TRACKING flight={} lookup=FALLBACK_FLIGHT_ICAO identifier={}", flightForLog, id);
+                Optional<TrackingProvider.LiveTrackingData> fb = trackingProvider.getByCallsign(id);
+                if (fb.isPresent() && isUsable(fb.get())) {
+                    log.info("AIRLABS_TRACKING flight={} lookup=FALLBACK_FLIGHT_ICAO result=LIVE_POSITION_FOUND", flightForLog);
+                    return fb;
+                }
+                log.info("AIRLABS_TRACKING flight={} lookup=FALLBACK_FLIGHT_ICAO result=NO_LIVE_POSITION", flightForLog);
+                return Optional.empty();
+            }
+
+            String hex = commercial.aircraftIcao();
+            if (hex != null && !hex.isBlank()) {
+                String id = hex.trim();
+                log.info("AIRLABS_TRACKING flight={} lookup=FALLBACK_HEX identifier={}", flightForLog, id);
+                Optional<TrackingProvider.LiveTrackingData> fb = trackingProvider.getByHex(id);
+                if (fb.isPresent() && isUsable(fb.get())) {
+                    log.info("AIRLABS_TRACKING flight={} lookup=FALLBACK_HEX result=LIVE_POSITION_FOUND", flightForLog);
+                    return fb;
+                }
+                log.info("AIRLABS_TRACKING flight={} lookup=FALLBACK_HEX result=NO_LIVE_POSITION", flightForLog);
+                return Optional.empty();
+            }
+
+            log.info("AIRLABS_TRACKING flight={} result=NO_LIVE_POSITION reason=no_fallback_identifier", flightForLog);
+            return Optional.empty();
         } catch (Exception e) {
-            log.warn("AirLabs live tracking unavailable for flight {}: {}", normalizedFlightIata, e.getClass().getSimpleName());
+            log.warn("AIRLABS_TRACKING flight={} result=PROVIDER_ERROR type={}", flightForLog, e.getClass().getSimpleName());
             return Optional.empty();
         }
+    }
+
+    private boolean isUsable(TrackingProvider.LiveTrackingData d) {
+        if (d == null) return false;
+        Double lat = d.latitude();
+        Double lng = d.longitude();
+        if (lat == null || lng == null) return false;
+        if (lat < -90.0 || lat > 90.0) return false;
+        if (lng < -180.0 || lng > 180.0) return false;
+        return true;
     }
 
     private FlightTrackingDto mergeTracking(FlightTrackingDto commercial, TrackingProvider.LiveTrackingData live) {

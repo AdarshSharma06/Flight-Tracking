@@ -121,10 +121,10 @@ class FlightServiceTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
-    // --- AirLabs tracking bridge tests (single lookup by IATA) ---
+    // --- AirLabs tracking bridge tests (primary + single fallback, max 2 calls) ---
 
     @Test
-    void trackingUsesAirLabsSingleLookup() {
+    void trackingUsesAirLabsPrimaryAndDoesNotFallbackWhenCoordinatesPresent() {
         FlightTrackingDto commercial = sampleTrackingDto("6E6706", "A12345", "IGO6706");
         when(flightProvider.getFlightTracking("6E6706")).thenReturn(commercial);
         when(trackingProvider.getByFlightIata("6E6706")).thenReturn(Optional.of(liveData("A12345", "IGO6706")));
@@ -132,21 +132,147 @@ class FlightServiceTest {
         var result = service.getTracking("6E6706");
 
         verify(trackingProvider).getByFlightIata("6E6706");
-        verify(trackingProvider, never()).getByIcao24(anyString());
+        verify(trackingProvider, never()).getByRegistration(anyString());
         verify(trackingProvider, never()).getByCallsign(anyString());
+        verify(trackingProvider, never()).getByIcao24(anyString());
+        verify(trackingProvider, never()).getByHex(anyString());
+        assertThat(result.latitude()).isEqualTo(28.5);
+        assertThat(result.longitude()).isEqualTo(77.0);
+    }
+
+    @Test
+    void trackingFallsBackToRegistrationWhenPrimaryEmpty() {
+        // Primary IATA empty, AeroDataBox provides VT-IPP
+        FlightTrackingDto commercial = new FlightTrackingDto(
+                "6E1495", "6E1495", "IGO52J", "2026-09-06", "departed",
+                "IndiGo", "6E", "IGO",
+                "VT-IPP", "Airbus A320 NEO", "801581",
+                "HYD", "HYD", "VIDP", null, null, "2026-09-06 18:44Z", null, null,
+                "RKT", "RKT", "VARG", null, null, null, null, null,
+                "HYD -> RKT", null, null, null, null, null, null, null, "2026-09-06 19:11Z", null, null);
+        when(flightProvider.getFlightTracking("6E1495")).thenReturn(commercial);
+        when(trackingProvider.getByFlightIata("6E1495")).thenReturn(Optional.empty());
+        when(trackingProvider.getByRegistration("VT-IPP")).thenReturn(Optional.of(liveData("801581", "IGO52J")));
+
+        var result = service.getTracking("6E1495");
+
+        verify(trackingProvider).getByFlightIata("6E1495");
+        verify(trackingProvider).getByRegistration("VT-IPP");
+        verify(trackingProvider, never()).getByCallsign(anyString());
+        verify(trackingProvider, never()).getByIcao24(anyString());
+        assertThat(result.latitude()).isEqualTo(28.5);
+        assertThat(result.longitude()).isEqualTo(77.0);
+        assertThat(result.altitude()).isEqualTo(10000.0);
+    }
+
+    @Test
+    void trackingFallsBackToFlightIcaoWhenRegistrationMissing() {
+        FlightTrackingDto commercial = new FlightTrackingDto(
+                "6E1495", "6E1495", "IGO52J", "2026-09-06", "departed",
+                "IndiGo", "6E", "IGO",
+                null, "Airbus A320 NEO", "801581",
+                "HYD", "HYD", "VIDP", null, null, null, null, null,
+                "RKT", "RKT", "VARG", null, null, null, null, null,
+                "HYD -> RKT", null, null, null, null, null, null, null, null, null, null);
+        when(flightProvider.getFlightTracking("6E1495")).thenReturn(commercial);
+        when(trackingProvider.getByFlightIata("6E1495")).thenReturn(Optional.empty());
+        when(trackingProvider.getByCallsign("IGO52J")).thenReturn(Optional.of(liveData("801581", "IGO52J")));
+
+        var result = service.getTracking("6E1495");
+        verify(trackingProvider).getByFlightIata("6E1495");
+        verify(trackingProvider, never()).getByRegistration(anyString());
+        verify(trackingProvider).getByCallsign("IGO52J");
+        assertThat(result.latitude()).isEqualTo(28.5);
+    }
+
+    @Test
+    void trackingFallsBackToHexWhenRegistrationAndFlightIcaoMissing() {
+        FlightTrackingDto commercial = new FlightTrackingDto(
+                "6E1495", "6E1495", null, "2026-09-06", "departed",
+                "IndiGo", "6E", "IGO",
+                null, "Airbus A320 NEO", "801581",
+                "HYD", "HYD", "VIDP", null, null, null, null, null,
+                "RKT", "RKT", "VARG", null, null, null, null, null,
+                "HYD -> RKT", null, null, null, null, null, null, null, null, null, null);
+        when(flightProvider.getFlightTracking("6E1495")).thenReturn(commercial);
+        when(trackingProvider.getByFlightIata("6E1495")).thenReturn(Optional.empty());
+        when(trackingProvider.getByHex("801581")).thenReturn(Optional.of(liveData("801581", "IGO52J")));
+
+        var result = service.getTracking("6E1495");
+        verify(trackingProvider).getByFlightIata("6E1495");
+        verify(trackingProvider).getByHex("801581");
+        assertThat(result.latitude()).isEqualTo(28.5);
+    }
+
+    @Test
+    void trackingNoFallbackWhenNoIdentifier() {
+        FlightTrackingDto commercial = new FlightTrackingDto(
+                "6E1495", "6E1495", null, "2026-09-06", "departed",
+                "IndiGo", "6E", "IGO",
+                null, "Airbus A320 NEO", null,
+                "HYD", "HYD", "VIDP", null, null, null, null, null,
+                "RKT", "RKT", "VARG", null, null, null, null, null,
+                "HYD -> RKT", null, null, null, null, null, null, null, null, null, null);
+        when(flightProvider.getFlightTracking("6E1495")).thenReturn(commercial);
+        when(trackingProvider.getByFlightIata("6E1495")).thenReturn(Optional.empty());
+
+        var result = service.getTracking("6E1495");
+        verify(trackingProvider).getByFlightIata("6E1495");
+        verify(trackingProvider, never()).getByRegistration(anyString());
+        verify(trackingProvider, never()).getByCallsign(anyString());
+        verify(trackingProvider, never()).getByIcao24(anyString());
+        assertThat(result.latitude()).isNull();
+    }
+
+    @Test
+    void trackingRegistrationFallbackZeroDoesNotTryNextFallback() {
+        FlightTrackingDto commercial = sampleTrackingDto("6E1495", "801581", "IGO52J");
+        // commercial has VT-ABC registration by default from sampleTrackingDto
+        when(flightProvider.getFlightTracking("6E1495")).thenReturn(commercial);
+        when(trackingProvider.getByFlightIata("6E1495")).thenReturn(Optional.empty());
+        when(trackingProvider.getByRegistration("VT-ABC")).thenReturn(Optional.empty());
+
+        var result = service.getTracking("6E1495");
+        verify(trackingProvider).getByFlightIata("6E1495");
+        verify(trackingProvider).getByRegistration("VT-ABC");
+        // Must NOT call flight_icao or hex next
+        verify(trackingProvider, never()).getByCallsign(anyString());
+        verify(trackingProvider, never()).getByIcao24(anyString());
+        verify(trackingProvider, never()).getByHex(anyString());
+        assertThat(result.latitude()).isEqualTo(28.5); // commercial preserved
+        assertThat(result.longitude()).isEqualTo(77.0);
+    }
+
+    @Test
+    void trackingFallbackInvalidCoordinatesTreatedAsNoLive() {
+        FlightTrackingDto commercial = sampleTrackingDto("6E1495", "801581", "IGO52J");
+        when(flightProvider.getFlightTracking("6E1495")).thenReturn(commercial);
+        when(trackingProvider.getByFlightIata("6E1495")).thenReturn(Optional.empty());
+        LiveTrackingData invalid = new LiveTrackingData("801581", "IGO52J", null, 200.0, 100.0, 10000.0, 10000.0, 450.0, 90.0, 0.0, null, false, 1L); // lat 100 invalid
+        when(trackingProvider.getByRegistration("VT-ABC")).thenReturn(Optional.of(invalid));
+
+        var result = service.getTracking("6E1495");
+        // Invalid coords -> treated as no live, commercial preserved
         assertThat(result.latitude()).isEqualTo(28.5);
         assertThat(result.longitude()).isEqualTo(77.0);
     }
 
     @Test
     void trackingDoesNotCallAirLabsWithBlank() {
-        FlightTrackingDto commercial = sampleTrackingDto("6E123", null, null);
+        FlightTrackingDto commercial = new FlightTrackingDto(
+                "6E123", "6E123", null, "2026-09-01", "active",
+                "IndiGo", "6E", "IGO",
+                null, "A320", null,
+                "Delhi Airport", "DEL", "VIDP", "3", "A", "2026-09-01T10:00:00Z", "2026-09-01T10:00:00Z", null,
+                "JFK Airport", "JFK", "KJFK", "4", "B", "2026-09-01T18:00:00Z", "2026-09-01T18:00:00Z", null,
+                "DEL -> JFK", 28.5, 77.0, 10000.0, 450.0, null, 90.0, false, "2026-09-01T12:00:00Z", null, null);
         when(flightProvider.getFlightTracking("6E123")).thenReturn(commercial);
+        when(trackingProvider.getByFlightIata("6E123")).thenReturn(Optional.empty());
 
         var result = service.getTracking("6E123");
-
-        // FlightService calls getByFlightIata with normalized 6E123, but mock not stubbed -> empty
-        // Verify commercial preserved
+        verify(trackingProvider).getByFlightIata("6E123");
+        // No registration/flightIcao/hex -> no fallback
+        verify(trackingProvider, never()).getByRegistration(anyString());
         assertThat(result.latitude()).isEqualTo(28.5);
     }
 
@@ -155,10 +281,11 @@ class FlightServiceTest {
         FlightTrackingDto commercial = sampleTrackingDto("6E123", "A12345", "IGO123");
         when(flightProvider.getFlightTracking("6E123")).thenReturn(commercial);
         when(trackingProvider.getByFlightIata("6E123")).thenReturn(Optional.empty());
+        // Mock fallback to also empty to ensure max 2 but no live
+        when(trackingProvider.getByRegistration(anyString())).thenReturn(Optional.empty());
 
         var result = service.getTracking("6E123");
 
-        // Commercial position preserved from AeroDataBox
         assertThat(result.latitude()).isEqualTo(28.5);
         assertThat(result.longitude()).isEqualTo(77.0);
         assertThat(result.flightNumber()).isEqualTo("6E123");
@@ -180,10 +307,22 @@ class FlightServiceTest {
 
         var result = service.getTracking("6E123");
 
-        // Commercial position preserved, live telemetry null
-        assertThat(result.latitude()).isEqualTo(28.5);
-        assertThat(result.longitude()).isEqualTo(77.0);
-        assertThat(result.altitude()).isEqualTo(10000.0);
+        // Commercial position preserved, live telemetry null but isUsable false -> fallback would be attempted, but we stub fallback empty
+        // For this test, commercial has VT-ABC registration, so fallback would be called after primary invalid.
+        // To keep test simple, we make commercial have no fallback identifiers by using custom DTO
+        FlightTrackingDto commercialNoFallback = new FlightTrackingDto(
+                "6E123", "6E123", null, "2026-09-01", "active",
+                "IndiGo", "6E", "IGO",
+                null, "A320", null,
+                "Delhi Airport", "DEL", "VIDP", "3", "A", "2026-09-01T10:00:00Z", "2026-09-01T10:00:00Z", null,
+                "JFK Airport", "JFK", "KJFK", "4", "B", "2026-09-01T18:00:00Z", "2026-09-01T18:00:00Z", null,
+                "DEL -> JFK", 28.5, 77.0, 10000.0, 450.0, null, 90.0, false, "2026-09-01T12:00:00Z", null, null);
+        when(flightProvider.getFlightTracking("6E123")).thenReturn(commercialNoFallback);
+        when(trackingProvider.getByFlightIata("6E123")).thenReturn(Optional.of(live));
+        var result2 = service.getTracking("6E123");
+        assertThat(result2.latitude()).isEqualTo(28.5);
+        assertThat(result2.longitude()).isEqualTo(77.0);
+        assertThat(result2.altitude()).isEqualTo(10000.0);
     }
 
     @Test
@@ -197,6 +336,36 @@ class FlightServiceTest {
         assertThat(result.latitude()).isEqualTo(28.5);
         assertThat(result.longitude()).isEqualTo(77.0);
         assertThat(result.flightNumber()).isEqualTo("6E6706");
+    }
+
+    @Test
+    void productionRegression6E1495FallbackToRegistration() {
+        FlightTrackingDto commercial = new FlightTrackingDto(
+                "6E 1495", "6E 1495", "IGO52J", "2026-09-06", "departed",
+                "IndiGo", "6E", "IGO",
+                "VT-IPP", "Airbus A320 NEO", "801581",
+                "HYD", "HYD", "VIDP", null, null, "2026-09-06 18:44Z", null, null,
+                "RKT", "RKT", "VARG", null, null, null, null, null,
+                "HYD -> RKT", null, null, null, null, null, null, null, "2026-09-06 19:11Z", null, null);
+        when(flightProvider.getFlightTracking("6E1495")).thenReturn(commercial);
+        when(trackingProvider.getByFlightIata("6E1495")).thenReturn(Optional.empty());
+        LiveTrackingData live = new LiveTrackingData(
+                "801581", "IGO52J", null,
+                72.845001, 18.68593, 10992.0, 10992.0,
+                null, 294.0, null,
+                null, null, 1788723103L);
+        when(trackingProvider.getByRegistration("VT-IPP")).thenReturn(Optional.of(live));
+
+        var result = service.getTracking("6E 1495");
+
+        verify(trackingProvider).getByFlightIata("6E1495");
+        verify(trackingProvider).getByRegistration("VT-IPP");
+        verify(trackingProvider, never()).getByCallsign(anyString());
+        assertThat(result.latitude()).isEqualTo(18.68593);
+        assertThat(result.longitude()).isEqualTo(72.845001);
+        assertThat(result.altitude()).isEqualTo(10992.0);
+        assertThat(result.direction()).isEqualTo(294.0);
+        assertThat(result.liveUpdated()).isEqualTo("1788723103");
     }
 
     // --- Flight number whitespace normalization (6E 589 → 6E589) ---

@@ -38,7 +38,7 @@ public class AirlabsClient {
 
     /**
      * Live flight lookup via Real-Time Flights endpoint.
-     * One tracking request -> at most one AirLabs call.
+     * One tracking request -> at most one AirLabs call for primary.
      * Returns selected live record or null if no valid live position.
      */
     public AirlabsFlight getFlightByIata(String flightIata) {
@@ -48,18 +48,41 @@ public class AirlabsClient {
     public AirlabsFlight getLiveFlightByIata(String flightIata) {
         String normalized = FlightNumberUtils.normalize(flightIata);
         if (normalized == null || normalized.isBlank()) {
-            log.info("AIRLABS_TRACKING flight={} result=NO_LIVE_POSITION reason=blank_flight_iata", flightIata);
+            log.info("AIRLABS_TRACKING flight={} lookup=PRIMARY_IATA result=NO_LIVE_POSITION reason=blank_flight_iata", flightIata);
             return null;
         }
+        return fetchLive("flight_iata", normalized, "PRIMARY_IATA");
+    }
+
+    public AirlabsFlight getFlightByRegNumber(String regNumber) {
+        if (regNumber == null || regNumber.isBlank()) return null;
+        String normalized = regNumber.trim().toUpperCase();
+        return fetchLive("reg_number", normalized, "FALLBACK_REGISTRATION");
+    }
+
+    public AirlabsFlight getFlightByFlightIcao(String flightIcao) {
+        if (flightIcao == null || flightIcao.isBlank()) return null;
+        String normalized = flightIcao.trim().toUpperCase();
+        return fetchLive("flight_icao", normalized, "FALLBACK_FLIGHT_ICAO");
+    }
+
+    public AirlabsFlight getFlightByHex(String hex) {
+        if (hex == null || hex.isBlank()) return null;
+        String normalized = hex.trim().toLowerCase();
+        return fetchLive("hex", normalized, "FALLBACK_HEX");
+    }
+
+    private AirlabsFlight fetchLive(String paramName, String paramValue, String lookupLabel) {
+        if (paramValue == null || paramValue.isBlank()) return null;
         if (properties.apiKey() == null || properties.apiKey().isBlank()) {
-            log.warn("AIRLABS_TRACKING flight={} result=PROVIDER_ERROR reason=missing_api_key", normalized);
+            log.warn("AIRLABS_TRACKING lookup={} {}={} result=PROVIDER_ERROR reason=missing_api_key", lookupLabel, paramName, paramValue);
             throw new ExternalApiException("AirLabs API key not configured", 503);
         }
         try {
             Map response = restClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/api/v9/flights")
-                            .queryParam("flight_iata", normalized)
+                            .queryParam(paramName, paramValue)
                             .queryParam("_fields", LIVE_FIELDS)
                             .queryParam("api_key", properties.apiKey())
                             .build())
@@ -72,67 +95,69 @@ public class AirlabsClient {
                     .body(Map.class);
 
             if (response == null) {
-                log.info("AIRLABS_TRACKING flight={} result=PROVIDER_ERROR reason=null_response", normalized);
+                log.info("AIRLABS_TRACKING lookup={} {}={} result=PROVIDER_ERROR reason=null_response", lookupLabel, paramName, paramValue);
                 return null;
             }
             Object error = response.get("error");
             if (error != null) {
-                log.warn("AIRLABS_TRACKING flight={} result=PROVIDER_ERROR error={}", normalized, safeError(error));
+                log.warn("AIRLABS_TRACKING lookup={} {}={} result=PROVIDER_ERROR error={}", lookupLabel, paramName, paramValue, safeError(error));
                 return null;
             }
             Object respObj = response.get("response");
             if (respObj == null) {
-                log.info("AIRLABS_TRACKING flight={} result=NO_LIVE_POSITION records=0 reason=null_response", normalized);
+                log.info("AIRLABS_TRACKING lookup={} {}={} result=NO_LIVE_POSITION records=0 reason=null_response", lookupLabel, paramName, paramValue);
                 return null;
             }
             List<Map<String, Object>> records = toRecordList(respObj);
             if (records.isEmpty()) {
-                log.info("AIRLABS_TRACKING flight={} result=NO_LIVE_POSITION records=0", normalized);
+                log.info("AIRLABS_TRACKING lookup={} {}={} result=NO_LIVE_POSITION records=0", lookupLabel, paramName, paramValue);
                 return null;
             }
-            // Filter to exact flight_iata match (normalized upper)
+            // Filter to exact flight_iata match when primary lookup
             List<Map<String, Object>> matched = new ArrayList<>();
-            for (Map<String, Object> m : records) {
-                String fi = toString(m.get("flight_iata"));
-                if (fi != null && FlightNumberUtils.normalize(fi).equals(normalized)) {
-                    matched.add(m);
+            if ("flight_iata".equals(paramName)) {
+                for (Map<String, Object> m : records) {
+                    String fi = toString(m.get("flight_iata"));
+                    if (fi != null && FlightNumberUtils.normalize(fi).equals(paramValue)) {
+                        matched.add(m);
+                    }
                 }
             }
             List<Map<String, Object>> candidates = matched.isEmpty() ? records : matched;
-            log.info("AIRLABS_TRACKING flight={} result=RECEIVED records={} matched={}", normalized, records.size(), matched.size());
+            log.info("AIRLABS_TRACKING lookup={} {}={} result=RECEIVED records={} matched={}", lookupLabel, paramName, paramValue, records.size(), matched.size());
 
             // Select best live record
             Map<String, Object> best = selectBest(candidates);
             if (best == null) {
-                log.info("AIRLABS_TRACKING flight={} result=NO_LIVE_POSITION reason=no_valid_coordinates", normalized);
+                log.info("AIRLABS_TRACKING lookup={} {}={} result=NO_LIVE_POSITION reason=no_valid_coordinates", lookupLabel, paramName, paramValue);
                 return null;
             }
             AirlabsFlight flight = mapToFlight(best);
             // Validate coordinates
             if (!isValidCoordinate(flight.lat(), flight.lng())) {
-                log.info("AIRLABS_TRACKING flight={} result=NO_LIVE_POSITION reason=invalid_or_missing_coordinates latPresent={} lngPresent={}", normalized, flight.lat() != null, flight.lng() != null);
+                log.info("AIRLABS_TRACKING lookup={} {}={} result=NO_LIVE_POSITION reason=invalid_or_missing_coordinates latPresent={} lngPresent={}", lookupLabel, paramName, paramValue, flight.lat() != null, flight.lng() != null);
                 return null;
             }
-            log.info("AIRLABS_TRACKING flight={} result=LIVE_POSITION_FOUND latPresent=true lngPresent=true status={} updated={}", normalized, flight.status(), flight.updated());
+            log.info("AIRLABS_TRACKING lookup={} {}={} result=LIVE_POSITION_FOUND latPresent=true lngPresent=true status={} updated={}", lookupLabel, paramName, paramValue, flight.status(), flight.updated());
             return flight;
 
         } catch (ExternalApiException e) {
             int status = e.getStatus();
-            String result = (status == 429 || status == 401 || status == 403) ? "PROVIDER_ERROR" : "PROVIDER_ERROR";
-            log.warn("AIRLABS_TRACKING flight={} result={} status={}", normalized, result, status);
+            String result = "PROVIDER_ERROR";
+            log.warn("AIRLABS_TRACKING lookup={} {}={} result={} status={}", lookupLabel, paramName, paramValue, result, status);
             throw e;
         } catch (Exception e) {
             String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
             if (msg.contains("timed out") || msg.contains("timeout")) {
-                log.warn("AIRLABS_TRACKING flight={} result=TIMEOUT", normalized);
+                log.warn("AIRLABS_TRACKING lookup={} {}={} result=TIMEOUT", lookupLabel, paramName, paramValue);
             } else if (msg.contains("unable to resolve") || msg.contains("unknownhost") || msg.contains("dns")) {
-                log.warn("AIRLABS_TRACKING flight={} result=DNS_ERROR", normalized);
+                log.warn("AIRLABS_TRACKING lookup={} {}={} result=DNS_ERROR", lookupLabel, paramName, paramValue);
             } else if (msg.contains("certificate") || msg.contains("ssl") || msg.contains("tls")) {
-                log.warn("AIRLABS_TRACKING flight={} result=TLS_ERROR", normalized);
+                log.warn("AIRLABS_TRACKING lookup={} {}={} result=TLS_ERROR", lookupLabel, paramName, paramValue);
             } else if (msg.contains("connection")) {
-                log.warn("AIRLABS_TRACKING flight={} result=CONNECTION_ERROR", normalized);
+                log.warn("AIRLABS_TRACKING lookup={} {}={} result=CONNECTION_ERROR", lookupLabel, paramName, paramValue);
             } else {
-                log.warn("AIRLABS_TRACKING flight={} result=CONNECTION_ERROR type={}", normalized, e.getClass().getSimpleName());
+                log.warn("AIRLABS_TRACKING lookup={} {}={} result=CONNECTION_ERROR type={}", lookupLabel, paramName, paramValue, e.getClass().getSimpleName());
             }
             throw new ExternalApiException("AirLabs API error: " + e.getMessage(), e);
         }

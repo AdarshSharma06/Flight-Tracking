@@ -28,14 +28,73 @@ public class AirlabsTrackingProvider implements TrackingProvider {
 
     @Override
     public Optional<LiveTrackingData> getByIcao24(String icao24) {
-        // AirLabs is flight-iata based; ICAO24 lookups not supported
-        return Optional.empty();
+        if (icao24 == null || icao24.isBlank()) return Optional.empty();
+        String normalized = icao24.trim().toLowerCase();
+        if (normalized.isBlank()) return Optional.empty();
+        try {
+            AirlabsFlight flight = client.getFlightByHex(normalized);
+            if (flight == null) return Optional.empty();
+            return Optional.of(mapToLiveData(flight));
+        } catch (Exception e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            if (msg.contains("429")) {
+                log.warn("AirLabs live tracking unavailable for hex {}: HTTP 429", normalized);
+            } else if (msg.contains("401") || msg.contains("403")) {
+                log.warn("AirLabs live tracking unavailable for hex {}: HTTP {}", normalized, msg.contains("401") ? 401 : 403);
+            } else {
+                log.warn("AirLabs live tracking unavailable for hex {}: {}", normalized, e.getClass().getSimpleName());
+            }
+            return Optional.empty();
+        }
     }
 
     @Override
     public Optional<LiveTrackingData> getByCallsign(String callsign) {
-        // AirLabs is flight-iata based
-        return Optional.empty();
+        if (callsign == null || callsign.isBlank()) return Optional.empty();
+        String normalized = callsign.trim().toUpperCase();
+        if (normalized.isBlank()) return Optional.empty();
+        try {
+            AirlabsFlight flight = client.getFlightByFlightIcao(normalized);
+            if (flight == null) return Optional.empty();
+            return Optional.of(mapToLiveData(flight));
+        } catch (Exception e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            if (msg.contains("429")) {
+                log.warn("AirLabs live tracking unavailable for callsign {}: HTTP 429", normalized);
+            } else if (msg.contains("401") || msg.contains("403")) {
+                log.warn("AirLabs live tracking unavailable for callsign {}: HTTP {}", normalized, msg.contains("401") ? 401 : 403);
+            } else {
+                log.warn("AirLabs live tracking unavailable for callsign {}: {}", normalized, e.getClass().getSimpleName());
+            }
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public Optional<LiveTrackingData> getByRegistration(String regNumber) {
+        if (regNumber == null || regNumber.isBlank()) return Optional.empty();
+        String normalized = regNumber.trim().toUpperCase();
+        if (normalized.isBlank()) return Optional.empty();
+        try {
+            AirlabsFlight flight = client.getFlightByRegNumber(normalized);
+            if (flight == null) return Optional.empty();
+            return Optional.of(mapToLiveData(flight));
+        } catch (Exception e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            if (msg.contains("429")) {
+                log.warn("AirLabs live tracking unavailable for registration {}: HTTP 429", normalized);
+            } else if (msg.contains("401") || msg.contains("403")) {
+                log.warn("AirLabs live tracking unavailable for registration {}: HTTP {}", normalized, msg.contains("401") ? 401 : 403);
+            } else {
+                log.warn("AirLabs live tracking unavailable for registration {}: {}", normalized, e.getClass().getSimpleName());
+            }
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public Optional<LiveTrackingData> getByHex(String hex) {
+        return getByIcao24(hex);
     }
 
     @Override
