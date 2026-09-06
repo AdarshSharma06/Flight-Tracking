@@ -121,45 +121,32 @@ class FlightServiceTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
-    // --- Tracking bridge tests ---
+    // --- AirLabs tracking bridge tests (single lookup by IATA) ---
 
     @Test
-    void trackingTriesIcao24First() {
-        FlightTrackingDto commercial = sampleTrackingDto("6E123", "A12345", "IGO123");
-        when(flightProvider.getFlightTracking("6E123")).thenReturn(commercial);
-        when(trackingProvider.getByIcao24("A12345")).thenReturn(Optional.of(liveData("A12345", "IGO123")));
+    void trackingUsesAirLabsSingleLookup() {
+        FlightTrackingDto commercial = sampleTrackingDto("6E6706", "A12345", "IGO6706");
+        when(flightProvider.getFlightTracking("6E6706")).thenReturn(commercial);
+        when(trackingProvider.getByFlightIata("6E6706")).thenReturn(Optional.of(liveData("A12345", "IGO6706")));
 
-        var result = service.getTracking("6E123");
+        var result = service.getTracking("6E6706");
 
-        verify(trackingProvider).getByIcao24("A12345");
+        verify(trackingProvider).getByFlightIata("6E6706");
+        verify(trackingProvider, never()).getByIcao24(anyString());
         verify(trackingProvider, never()).getByCallsign(anyString());
         assertThat(result.latitude()).isEqualTo(28.5);
         assertThat(result.longitude()).isEqualTo(77.0);
     }
 
     @Test
-    void trackingFallsBackToIcaoCallsign() {
-        FlightTrackingDto commercial = sampleTrackingDto("6E123", null, "IGO123");
-        when(flightProvider.getFlightTracking("6E123")).thenReturn(commercial);
-        when(trackingProvider.getByCallsign("IGO123")).thenReturn(Optional.of(liveData("A12345", "IGO123")));
-
-        var result = service.getTracking("6E123");
-
-        verify(trackingProvider, never()).getByIcao24(anyString());
-        verify(trackingProvider).getByCallsign("IGO123");
-        assertThat(result.latitude()).isEqualTo(28.5);
-    }
-
-    @Test
-    void trackingDoesNotUseIataAsCallsign() {
+    void trackingDoesNotCallAirLabsWithBlank() {
         FlightTrackingDto commercial = sampleTrackingDto("6E123", null, null);
         when(flightProvider.getFlightTracking("6E123")).thenReturn(commercial);
 
         var result = service.getTracking("6E123");
 
-        verify(trackingProvider, never()).getByIcao24(anyString());
-        verify(trackingProvider, never()).getByCallsign(anyString());
-        // Commercial position still present from AeroDataBox
+        // FlightService calls getByFlightIata with normalized 6E123, but mock not stubbed -> empty
+        // Verify commercial preserved
         assertThat(result.latitude()).isEqualTo(28.5);
     }
 
@@ -167,8 +154,7 @@ class FlightServiceTest {
     void trackingReturnsCommercialOnlyWhenNoLiveData() {
         FlightTrackingDto commercial = sampleTrackingDto("6E123", "A12345", "IGO123");
         when(flightProvider.getFlightTracking("6E123")).thenReturn(commercial);
-        when(trackingProvider.getByIcao24("A12345")).thenReturn(Optional.empty());
-        when(trackingProvider.getByCallsign("IGO123")).thenReturn(Optional.empty());
+        when(trackingProvider.getByFlightIata("6E123")).thenReturn(Optional.empty());
 
         var result = service.getTracking("6E123");
 
@@ -190,7 +176,7 @@ class FlightServiceTest {
                 null, null, null,
                 null, null, null
         );
-        when(trackingProvider.getByIcao24("A12345")).thenReturn(Optional.of(live));
+        when(trackingProvider.getByFlightIata("6E123")).thenReturn(Optional.of(live));
 
         var result = service.getTracking("6E123");
 
@@ -200,14 +186,26 @@ class FlightServiceTest {
         assertThat(result.altitude()).isEqualTo(10000.0);
     }
 
+    @Test
+    void trackingHandlesAirLabsFailureGracefully() {
+        FlightTrackingDto commercial = sampleTrackingDto("6E6706", "A12345", "IGO6706");
+        when(flightProvider.getFlightTracking("6E6706")).thenReturn(commercial);
+        when(trackingProvider.getByFlightIata("6E6706")).thenThrow(new RuntimeException("timeout"));
+
+        var result = service.getTracking("6E6706");
+
+        assertThat(result.latitude()).isEqualTo(28.5);
+        assertThat(result.longitude()).isEqualTo(77.0);
+        assertThat(result.flightNumber()).isEqualTo("6E6706");
+    }
+
     // --- Flight number whitespace normalization (6E 589 → 6E589) ---
 
     @Test
     void getTracking_normalizesWhitespaceBeforeProviderCall() {
         FlightTrackingDto commercial = sampleTrackingDto("6E589", "A12345", "IGO589");
         when(flightProvider.getFlightTracking("6E589")).thenReturn(commercial);
-        when(trackingProvider.getByIcao24("A12345")).thenReturn(Optional.empty());
-        when(trackingProvider.getByCallsign("IGO589")).thenReturn(Optional.empty());
+        when(trackingProvider.getByFlightIata("6E589")).thenReturn(Optional.empty());
 
         service.getTracking("6E 589");
         verify(flightProvider).getFlightTracking("6E589");

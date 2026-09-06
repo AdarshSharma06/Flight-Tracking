@@ -57,6 +57,10 @@ app:
   open-meteo:
     base-url: ${OPENMETEO_BASE_URL:https://api.open-meteo.com}
     timeout-ms: ${OPENMETEO_TIMEOUT_MS:5000}
+  airlabs:
+    api-key: ${AIRLABS_API_KEY:}
+    base-url: ${AIRLABS_BASE_URL:https://airlabs.co}
+    timeout-ms: ${AIRLABS_TIMEOUT_MS:10000}
   cors:
     # Comma-separated list, configurable via env CORS_ALLOWED_ORIGINS for production React frontend
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}

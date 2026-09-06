@@ -496,7 +496,7 @@ export function TrackingPage() {
                 <Alert>
                   <Gauge className="size-4" />
                   <AlertTitle className="text-xs">No live data</AlertTitle>
-                  <AlertDescription className="text-xs">Live position is currently unavailable. Backend returned no latitude/longitude for this flight — check AviationStack plan/limits.</AlertDescription>
+                  <AlertDescription className="text-xs">Live position is currently unavailable.</AlertDescription>
                 </Alert>
               )}
               {!tracking && !displayFlight && <p className="text-xs text-muted-foreground">Select a flight first.</p>}

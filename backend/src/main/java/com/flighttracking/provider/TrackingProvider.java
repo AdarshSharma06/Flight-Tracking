@@ -18,6 +18,14 @@ public interface TrackingProvider {
      */
     Optional<LiveTrackingData> getByCallsign(String callsign);
 
+    /**
+     * Get live tracking data for a flight identified by IATA flight number.
+     * Used by AirLabs provider (primary live lookup: /api/v9/flight?flight_iata=...).
+     */
+    default Optional<LiveTrackingData> getByFlightIata(String flightIata) {
+        return Optional.empty();
+    }
+
     String getProviderName();
 
     record LiveTrackingData(

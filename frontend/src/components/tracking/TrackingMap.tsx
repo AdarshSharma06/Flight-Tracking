@@ -75,7 +75,7 @@ export function TrackingMap({ live, departure, arrival, altitude, speed, classNa
           </div>
           <div className="space-y-1">
             <p className="text-sm font-medium">No position to display</p>
-            <p className="text-xs text-muted-foreground max-w-[32ch]">Select a flight to see its route. Live position appears only when the backend returns latitude/longitude (AviationStack free tier often has no live data).</p>
+            <p className="text-xs text-muted-foreground max-w-[32ch]">Select a flight to see its route. Live position appears only when the backend returns latitude/longitude.</p>
           </div>
         </div>
         <div className="p-3 border-t bg-muted/30 rounded-b-xl">
