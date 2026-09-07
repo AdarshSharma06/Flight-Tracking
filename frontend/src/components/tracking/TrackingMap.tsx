@@ -98,10 +98,10 @@ export function TrackingMap({ live, departure, arrival, altitude, speed, heading
 
   return (
     <div className={`w-full h-full relative bg-black ${className ?? ""}`} style={{ minHeight: 320 }}>
-      <MapContainer center={center} zoom={4} scrollWheelZoom={true} className="h-full w-full bg-black z-0" zoomControl={true} style={{ height: "100%", width: "100%" }}>
-        <TileLayer 
-          attribution='&copy; <a href="https://carto.com/">Carto</a>' 
-          url="https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png" 
+      <MapContainer center={center} zoom={4} scrollWheelZoom={true} className="h-full w-full z-0" zoomControl={true} style={{ height: "100%", width: "100%", background: "#e5e7eb" }}>
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         {departure && (
           <Marker position={[departure.lat, departure.lng]} icon={dotIcon}>

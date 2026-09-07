@@ -319,9 +319,9 @@ export function TrackingPage() {
     <div className="w-full flex-1 flex flex-col lg:flex-row min-h-[100dvh] pt-20 bg-background overflow-hidden">
       {/* LEFT 60% */}
       <div className="w-full lg:w-[60%] flex flex-col h-auto lg:h-[calc(100dvh-80px)] lg:overflow-hidden border-r border-white/5 relative bg-background">
-        {/* Search – premium glass panel */}
-        <div className="shrink-0 p-4 lg:p-6 border-b border-white/5 bg-background/80 backdrop-blur">
-          <div className="flex items-center justify-between mb-4">
+        {/* Search – compact glass panel */}
+        <div className="shrink-0 p-3 lg:p-4 border-b border-white/5 bg-background/80 backdrop-blur">
+          <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div className="size-7 rounded bg-primary/15 border border-primary/20 flex items-center justify-center">
                 <Search className="size-3.5 text-primary" />
@@ -340,9 +340,9 @@ export function TrackingPage() {
             </button>
           </div>
 
-          {/* Primary row */}
-          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-12">
-            <div className="lg:col-span-3 space-y-1.5">
+          {/* Primary row – consistent h-8 baseline */}
+          <div className="grid gap-2.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 items-end">
+            <div className="lg:col-span-3 space-y-1">
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Flight</Label>
               <div className="relative">
                 <Ticket className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
@@ -350,12 +350,12 @@ export function TrackingPage() {
                   placeholder="LH400"
                   value={flightIata}
                   onChange={(e) => setFlightIata(e.target.value)}
-                  className="pl-8 bg-white/[0.04] border-white/10 font-mono text-sm uppercase h-9 focus-visible:border-primary/40"
+                  className="pl-8 bg-white/[0.04] border-white/10 font-mono text-sm uppercase h-8 focus-visible:border-primary/40"
                   onKeyDown={(e) => e.key === "Enter" && doSearch()}
                 />
               </div>
             </div>
-            <div className="lg:col-span-2 space-y-1.5">
+            <div className="lg:col-span-2 space-y-1">
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Departure</Label>
               <div className="relative">
                 <MapPin className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
@@ -364,12 +364,12 @@ export function TrackingPage() {
                   maxLength={3}
                   value={depIata}
                   onChange={(e) => setDepIata(e.target.value.toUpperCase())}
-                  className="pl-8 bg-white/[0.04] border-white/10 font-mono text-sm uppercase h-9"
+                  className="pl-8 bg-white/[0.04] border-white/10 font-mono text-sm uppercase h-8"
                   onKeyDown={(e) => e.key === "Enter" && doSearch()}
                 />
               </div>
             </div>
-            <div className="lg:col-span-2 space-y-1.5">
+            <div className="lg:col-span-2 space-y-1">
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Arrival</Label>
               <div className="relative">
                 <MapPin className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
@@ -378,25 +378,25 @@ export function TrackingPage() {
                   maxLength={3}
                   value={arrIata}
                   onChange={(e) => setArrIata(e.target.value.toUpperCase())}
-                  className="pl-8 bg-white/[0.04] border-white/10 font-mono text-sm uppercase h-9"
+                  className="pl-8 bg-white/[0.04] border-white/10 font-mono text-sm uppercase h-8"
                   onKeyDown={(e) => e.key === "Enter" && doSearch()}
                 />
               </div>
             </div>
-            <div className="lg:col-span-2 space-y-1.5">
+            <div className="lg:col-span-2 space-y-1">
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Airline</Label>
               <Input
                 placeholder="LH"
                 value={airlineIata}
                 onChange={(e) => setAirlineIata(e.target.value.toUpperCase())}
-                className="bg-white/[0.04] border-white/10 font-mono text-sm uppercase h-9"
+                className="bg-white/[0.04] border-white/10 font-mono text-sm uppercase h-8"
                 onKeyDown={(e) => e.key === "Enter" && doSearch()}
               />
             </div>
-            <div className="lg:col-span-3 space-y-1.5">
+            <div className="lg:col-span-3 space-y-1">
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Status</Label>
               <Select value={flightStatus || "all"} onValueChange={(v) => setFlightStatus((v as string) === "all" ? "" : (v as string) ?? "")}>
-                <SelectTrigger className="h-9 bg-white/[0.04] border-white/10 font-mono text-sm">
+                <SelectTrigger className="h-8 bg-white/[0.04] border-white/10 font-mono text-sm">
                   <SelectValue placeholder="Any" />
                 </SelectTrigger>
                 <SelectContent>
@@ -412,8 +412,8 @@ export function TrackingPage() {
             </div>
           </div>
 
-          {/* actions row */}
-          <div className="flex flex-wrap items-center gap-2 mt-4">
+          {/* actions row – aligned baseline */}
+          <div className="flex flex-wrap items-center gap-2 mt-3">
             <div className="flex items-center gap-2">
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Limit</Label>
               <Select value={limit} onValueChange={(v) => setLimit((v as string) ?? "10")}>
@@ -450,8 +450,8 @@ export function TrackingPage() {
           </div>
 
           {showAdvanced && (
-            <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.02] p-3 flex items-start gap-2">
-              <BadgeInfo className="size-4 text-primary shrink-0 mt-0.5" />
+            <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] p-2.5 flex items-start gap-2">
+              <BadgeInfo className="size-3.5 text-primary shrink-0 mt-0.5" />
               <p className="text-xs text-muted-foreground leading-relaxed">
                 Filters combine with AND. Use specific IATA codes for precise results. Status alone requires another filter.
               </p>
@@ -459,20 +459,20 @@ export function TrackingPage() {
           )}
 
           {searchError && (
-            <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 flex items-start gap-2">
+            <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 flex items-start gap-2">
               <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
               <p className="text-xs text-destructive leading-relaxed">{searchError}</p>
             </div>
           )}
         </div>
 
-        {/* scrollable content */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 lg:p-6 space-y-6 lg:pb-8">
+        {/* scrollable content – tighter density */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 lg:p-4 space-y-4 lg:pb-6">
           {/* awaiting */}
           {!displayFlight && !loadingDetail && !loadingSearch && !results && !searchError && (
-            <div className="h-[280px] flex flex-col items-center justify-center text-center space-y-4 opacity-60 glass-panel rounded-xl border-dashed">
-              <div className="size-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
-                <Target className="size-6 text-muted-foreground" />
+            <div className="h-[240px] flex flex-col items-center justify-center text-center space-y-3 opacity-60 glass-panel rounded-xl border-dashed">
+              <div className="size-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+                <Target className="size-5 text-muted-foreground" />
               </div>
               <div className="space-y-1">
                 <p className="font-mono text-xs uppercase tracking-[0.2em] text-white">Awaiting Input</p>
@@ -483,7 +483,7 @@ export function TrackingPage() {
 
           {/* loading detail */}
           {loadingDetail && (
-            <div className="flex items-center justify-center py-16 gap-2 text-muted-foreground">
+            <div className="flex items-center justify-center py-10 gap-2 text-muted-foreground">
               <Loader2 className="size-5 animate-spin text-primary" />
               <span className="font-mono text-xs uppercase tracking-widest">Acquiring telemetry…</span>
             </div>
@@ -491,10 +491,10 @@ export function TrackingPage() {
 
           {/* Selected flight */}
           {displayFlight && !loadingDetail && (
-            <div className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
-              {/* Identity header */}
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1.5">
+            <div className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-4">
+              {/* Identity header – tighter */}
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <p className="text-[11px] uppercase tracking-[0.2em] font-semibold text-primary">
                       {displayFlight.airlineName ?? displayFlight.airlineIata ?? "Aviation"}
@@ -509,52 +509,52 @@ export function TrackingPage() {
                       </span>
                     )}
                   </div>
-                  <h1 className="text-4xl lg:text-5xl font-semibold tracking-tighter text-white font-mono uppercase leading-none">
+                  <h1 className="text-3xl lg:text-4xl font-semibold tracking-tighter text-white font-mono uppercase leading-none">
                     {displayFlight.flightIata ?? displayFlight.flightNumber ?? "—"}
                   </h1>
-                  <p className="text-xs text-muted-foreground font-mono flex items-center gap-2">
-                    <Plane className="size-3.5" />
+                  <p className="text-[11px] text-muted-foreground font-mono flex items-center gap-1.5">
+                    <Plane className="size-3" />
                     {displayFlight.aircraftRegistration ?? displayFlight.aircraftIata ?? "Unknown Equipment"}
                     {displayFlight.aircraftIcao ? ` • ${displayFlight.aircraftIcao}` : ""}
                   </p>
                 </div>
-                <div className={`shrink-0 px-3 py-1.5 rounded-full border text-[10px] uppercase font-bold tracking-widest font-mono ${statusPillClasses(displayFlight.status ?? tracking?.status ?? null)}`}>
+                <div className={`shrink-0 px-2.5 py-1 rounded-full border text-[10px] uppercase font-bold tracking-widest font-mono ${statusPillClasses(displayFlight.status ?? tracking?.status ?? null)}`}>
                   {formatStatus(displayFlight.status ?? tracking?.status ?? null)}
                 </div>
               </div>
 
-              {/* Route card */}
-              <div className="glass-panel rounded-xl p-5 lg:p-6">
-                <div className="flex items-center gap-2 mb-4">
+              {/* Route card – compact */}
+              <div className="glass-panel rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3">
                   <RouteIcon className="size-3.5 text-primary" />
                   <span className="text-[11px] uppercase tracking-[0.18em] font-semibold text-muted-foreground">Route</span>
                   {tracking?.route && <span className="text-[11px] font-mono text-white/60">• {tracking.route}</span>}
                 </div>
-                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
-                  <div className="space-y-1.5">
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                  <div className="space-y-1">
                     <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Departure</p>
-                    <p className="text-3xl lg:text-4xl font-mono text-white leading-none">{displayFlight.departureIata ?? "—"}</p>
-                    <p className="text-xs text-muted-foreground truncate">{displayFlight.departureAirport ?? "—"}</p>
-                    <p className="font-mono text-xs text-white/70">{displayFlight.departureScheduled ? formatTimestamp(displayFlight.departureScheduled) : "—"}</p>
+                    <p className="text-2xl lg:text-3xl font-mono text-white leading-none">{displayFlight.departureIata ?? "—"}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{displayFlight.departureAirport ?? "—"}</p>
+                    <p className="font-mono text-[11px] text-white/70">{displayFlight.departureScheduled ? formatTimestamp(displayFlight.departureScheduled) : "—"}</p>
                     {(displayFlight.departureTerminal || displayFlight.departureGate) && (
                       <p className="text-[11px] font-mono text-muted-foreground">T {displayFlight.departureTerminal ?? "—"} • G {displayFlight.departureGate ?? "—"}</p>
                     )}
                   </div>
-                  <div className="flex flex-col items-center gap-2 px-2">
-                    <div className="h-px w-10 lg:w-16 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
-                    <div className="size-8 rounded-full bg-primary/15 border border-primary/25 flex items-center justify-center shadow-[0_0_16px_rgba(56,189,248,0.3)]">
-                      <Plane className="size-4 text-primary rotate-90" />
+                  <div className="flex flex-col items-center gap-1.5 px-2">
+                    <div className="h-px w-10 lg:w-12 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                    <div className="size-7 rounded-full bg-primary/15 border border-primary/25 flex items-center justify-center shadow-[0_0_12px_rgba(56,189,248,0.3)]">
+                      <Plane className="size-3.5 text-primary rotate-90" />
                     </div>
-                    <div className="h-px w-10 lg:w-16 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                    <div className="h-px w-10 lg:w-12 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
                     <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
                       {displayFlight.departureIata && displayFlight.arrivalIata ? `${displayFlight.departureIata} → ${displayFlight.arrivalIata}` : "—"}
                     </span>
                   </div>
-                  <div className="space-y-1.5 text-right">
+                  <div className="space-y-1 text-right">
                     <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Arrival</p>
-                    <p className="text-3xl lg:text-4xl font-mono text-white leading-none">{displayFlight.arrivalIata ?? "—"}</p>
-                    <p className="text-xs text-muted-foreground truncate">{displayFlight.arrivalAirport ?? "—"}</p>
-                    <p className="font-mono text-xs text-white/70">{displayFlight.arrivalScheduled ? formatTimestamp(displayFlight.arrivalScheduled) : "—"}</p>
+                    <p className="text-2xl lg:text-3xl font-mono text-white leading-none">{displayFlight.arrivalIata ?? "—"}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{displayFlight.arrivalAirport ?? "—"}</p>
+                    <p className="font-mono text-[11px] text-white/70">{displayFlight.arrivalScheduled ? formatTimestamp(displayFlight.arrivalScheduled) : "—"}</p>
                     {(displayFlight.arrivalTerminal || displayFlight.arrivalGate) && (
                       <p className="text-[11px] font-mono text-muted-foreground">T {displayFlight.arrivalTerminal ?? "—"} • G {displayFlight.arrivalGate ?? "—"}</p>
                     )}
@@ -562,19 +562,19 @@ export function TrackingPage() {
                 </div>
               </div>
 
-              {/* Flight details tabs */}
-              <div className="glass-panel rounded-xl p-4 lg:p-5">
-                <div className="flex items-center gap-2 mb-3">
+              {/* Flight details tabs – compact */}
+              <div className="glass-panel rounded-xl p-3.5">
+                <div className="flex items-center gap-2 mb-2.5">
                   <Clock className="size-3.5 text-primary" />
                   <span className="text-[11px] uppercase tracking-[0.18em] font-semibold text-muted-foreground">Flight Details</span>
                 </div>
                 <Tabs defaultValue="flight" className="w-full">
-                  <TabsList className="w-full bg-white/[0.04] border border-white/5 p-1 h-8">
+                  <TabsList className="w-full bg-white/[0.04] border border-white/5 p-1 h-7">
                     <TabsTrigger value="flight" className="flex-1 text-xs data-[state=active]:bg-white data-[state=active]:text-black">Flight</TabsTrigger>
                     <TabsTrigger value="schedule" className="flex-1 text-xs data-[state=active]:bg-white data-[state=active]:text-black">Schedule</TabsTrigger>
                     <TabsTrigger value="aircraft" className="flex-1 text-xs data-[state=active]:bg-white data-[state=active]:text-black">Aircraft</TabsTrigger>
                   </TabsList>
-                  <TabsContent value="flight" className="space-y-0 pt-4">
+                  <TabsContent value="flight" className="space-y-0 pt-3">
                     <DetailRow label="Flight" value={displayFlight.flightIata ?? displayFlight.flightNumber} mono />
                     <DetailRow label="Number" value={displayFlight.flightNumber} mono />
                     <DetailRow label="ICAO" value={displayFlight.flightIcao} mono />
@@ -582,9 +582,9 @@ export function TrackingPage() {
                     <DetailRow label="Airline ICAO" value={displayFlight.airlineIcao} mono />
                     <DetailRow label="Status" value={<span className={`inline-flex px-2 py-0.5 rounded-full border text-[11px] font-mono uppercase tracking-widest ${statusPillClasses(displayFlight.status)}`}>{formatStatus(displayFlight.status)}</span>} />
                   </TabsContent>
-                  <TabsContent value="schedule" className="space-y-4 pt-4">
+                  <TabsContent value="schedule" className="space-y-3 pt-3">
                     <div className="space-y-0">
-                      <p className="text-[11px] uppercase tracking-widest font-semibold text-primary flex items-center gap-1.5 mb-2"><MapPin className="size-3" /> Departure</p>
+                      <p className="text-[11px] uppercase tracking-widest font-semibold text-primary flex items-center gap-1.5 mb-1.5"><MapPin className="size-3" /> Departure</p>
                       <DetailRow label="Airport" value={displayFlight.departureAirport} />
                       <DetailRow label="IATA" value={displayFlight.departureIata} mono />
                       <DetailRow label="ICAO" value={displayFlight.departureIcao} mono />
@@ -596,7 +596,7 @@ export function TrackingPage() {
                     </div>
                     <div className="h-px bg-white/5" />
                     <div className="space-y-0">
-                      <p className="text-[11px] uppercase tracking-widest font-semibold text-primary flex items-center gap-1.5 mb-2"><MapPin className="size-3" /> Arrival</p>
+                      <p className="text-[11px] uppercase tracking-widest font-semibold text-primary flex items-center gap-1.5 mb-1.5"><MapPin className="size-3" /> Arrival</p>
                       <DetailRow label="Airport" value={displayFlight.arrivalAirport} />
                       <DetailRow label="IATA" value={displayFlight.arrivalIata} mono />
                       <DetailRow label="ICAO" value={displayFlight.arrivalIcao} mono />
@@ -607,7 +607,7 @@ export function TrackingPage() {
                       <DetailRow label="Delay" value={displayFlight.arrivalDelay} mono />
                     </div>
                   </TabsContent>
-                  <TabsContent value="aircraft" className="space-y-0 pt-4">
+                  <TabsContent value="aircraft" className="space-y-0 pt-3">
                     <DetailRow label="Registration" value={displayFlight.aircraftRegistration} mono />
                     <DetailRow label="IATA" value={displayFlight.aircraftIata} mono />
                     <DetailRow label="ICAO" value={displayFlight.aircraftIcao} mono />
@@ -621,9 +621,9 @@ export function TrackingPage() {
                 )}
               </div>
 
-              {/* Live Telemetry */}
-              <div className="glass-panel rounded-xl p-4 lg:p-5">
-                <div className="flex items-center justify-between border-b border-white/5 pb-3 mb-4">
+              {/* Live Telemetry – compact */}
+              <div className="glass-panel rounded-xl p-3.5">
+                <div className="flex items-center justify-between border-b border-white/5 pb-2.5 mb-3">
                   <h3 className="text-[11px] uppercase tracking-[0.18em] font-semibold text-muted-foreground flex items-center gap-2">
                     <Activity className="size-3.5 text-primary" /> Live Tracking
                   </h3>
@@ -634,13 +634,13 @@ export function TrackingPage() {
                   )}
                 </div>
                 {!tracking ? (
-                  <div className="flex items-center gap-2 py-6 justify-center text-muted-foreground">
+                  <div className="flex items-center gap-2 py-5 justify-center text-muted-foreground">
                     <Gauge className="size-4" />
                     <span className="text-xs font-mono">No live telemetry available for this flight.</span>
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
                       <DataBlock label="Altitude" value={tracking.altitude != null ? `${tracking.altitude}` : null} unit="m" />
                       <DataBlock label="Speed" value={tracking.speed != null ? `${tracking.speed}` : null} unit="km/h" />
                       <DataBlock label="Heading" value={tracking.direction != null ? `${Number(tracking.direction).toFixed(1)}` : null} unit="°" />
@@ -663,48 +663,48 @@ export function TrackingPage() {
                 )}
               </div>
 
-              {/* Weather */}
-              <div className="glass-panel rounded-xl p-4 lg:p-5">
-                <h3 className="text-[11px] uppercase tracking-[0.18em] font-semibold text-muted-foreground flex items-center gap-2 border-b border-white/5 pb-3 mb-4">
+              {/* Weather – compact */}
+              <div className="glass-panel rounded-xl p-3.5">
+                <h3 className="text-[11px] uppercase tracking-[0.18em] font-semibold text-muted-foreground flex items-center gap-2 border-b border-white/5 pb-2.5 mb-3">
                   <Thermometer className="size-3.5 text-primary" /> Current Weather
                 </h3>
                 {!tracking || tracking.latitude == null || tracking.longitude == null ? (
-                  <p className="text-xs text-muted-foreground font-mono py-4 text-center">Select a flight with live position to load weather.</p>
+                  <p className="text-xs text-muted-foreground font-mono py-3 text-center">Select a flight with live position to load weather.</p>
                 ) : (
                   <>
                     {loadingWeather && (
-                      <div className="flex items-center justify-center py-8 gap-2">
+                      <div className="flex items-center justify-center py-6 gap-2">
                         <Loader2 className="size-4 animate-spin text-primary" />
                         <span className="text-xs font-mono text-muted-foreground">Loading conditions…</span>
                       </div>
                     )}
                     {!loadingWeather && weatherError && (
-                      <div className="rounded-lg border border-white/10 bg-white/[0.02] px-4 py-6 text-center">
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] px-4 py-5 text-center">
                         <p className="text-xs text-muted-foreground">Weather data temporarily unavailable</p>
                       </div>
                     )}
                     {!loadingWeather && weather && !weatherError && (
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-1">
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2.5 space-y-1">
                           <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
                             <Thermometer className="size-3" /> Temperature
                           </div>
-                          <div className="text-lg font-mono font-semibold text-white">{weather.temperature}°C</div>
+                          <div className="text-base font-mono font-semibold text-white">{weather.temperature}°C</div>
                           <div className="text-[11px] text-muted-foreground">{weather.weatherCondition ?? "—"} • Feels {weather.apparentTemperature ?? "—"}°C</div>
                         </div>
-                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-1">
+                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2.5 space-y-1">
                           <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
                             <Wind className="size-3" /> Wind
                           </div>
-                          <div className="text-lg font-mono font-semibold text-white">{weather.windSpeed ?? "—"} km/h</div>
+                          <div className="text-base font-mono font-semibold text-white">{weather.windSpeed ?? "—"} km/h</div>
                           <div className="text-[11px] text-muted-foreground">Humidity {weather.humidity ?? "—"}%</div>
                         </div>
-                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-1">
+                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2.5 space-y-1">
                           <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Precipitation</div>
-                          <div className="text-lg font-mono font-semibold text-white">{weather.precipitation ?? "—"} mm</div>
+                          <div className="text-base font-mono font-semibold text-white">{weather.precipitation ?? "—"} mm</div>
                           <div className="text-[11px] text-muted-foreground truncate">{weather.timezone ?? ""}</div>
                         </div>
-                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-1">
+                        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2.5 space-y-1">
                           <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Observation</div>
                           <div className="text-xs font-mono text-white">{weather.observationTime ? formatTimestamp(weather.observationTime) : "—"}</div>
                           <div className="text-[11px] text-muted-foreground">Code {weather.weatherCode ?? "—"}</div>
@@ -718,9 +718,9 @@ export function TrackingPage() {
             </div>
           )}
 
-          {/* Results */}
-          <div className="glass-panel rounded-xl p-4 lg:p-5">
-            <div className="flex items-center justify-between mb-4">
+          {/* Results – compact */}
+          <div className="glass-panel rounded-xl p-3.5">
+            <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <Navigation className="size-3.5 text-primary" />
                 <h3 className="text-[11px] uppercase tracking-[0.18em] font-semibold text-muted-foreground">Results</h3>
@@ -849,12 +849,12 @@ export function TrackingPage() {
 function DataBlock({ label, value, unit, icon }: { label: string; value: string | null; unit: string; icon?: React.ReactNode }) {
   const has = value != null && value !== "" && value !== "—";
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-1">
+    <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2.5 space-y-0.5">
       <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1 font-semibold">
         {icon}
         {label}
       </p>
-      <p className="font-mono text-base text-white leading-none">
+      <p className="font-mono text-sm text-white leading-none">
         {has ? value : "—"} {has ? <span className="text-xs text-muted-foreground font-normal">{unit}</span> : null}
       </p>
     </div>
@@ -863,17 +863,17 @@ function DataBlock({ label, value, unit, icon }: { label: string; value: string 
 function DetailRow({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   const isEmpty = value == null || value === "" || (typeof value === "string" && value.trim() === "");
   return (
-    <div className="flex justify-between gap-4 py-2 border-b border-white/[0.04] last:border-0 text-xs">
+    <div className="flex justify-between gap-3 py-1.5 border-b border-white/[0.04] last:border-0 text-xs">
       <span className="text-muted-foreground shrink-0 text-[11px] uppercase tracking-wider font-medium">{label}</span>
-      <span className={`font-medium text-right break-all max-w-[60%] ${mono ? "font-mono text-white" : "text-white"}`}>{isEmpty ? "—" : (value as string)}</span>
+      <span className={`font-medium text-right break-words max-w-[62%] ${mono ? "font-mono text-white" : "text-white"}`}>{isEmpty ? "—" : (value as string)}</span>
     </div>
   );
 }
 function LiveRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="flex justify-between gap-4 py-1.5 border-b border-white/[0.04] last:border-0">
+    <div className="flex justify-between gap-3 py-1 border-b border-white/[0.04] last:border-0">
       <span className="text-muted-foreground shrink-0 text-[11px]">{label}</span>
-      <span className={`text-right break-all font-medium max-w-[55%] ${mono ? "font-mono text-white text-xs" : "text-white text-xs"}`}>{value}</span>
+      <span className={`text-right break-words font-medium max-w-[56%] ${mono ? "font-mono text-white text-xs" : "text-white text-xs"}`}>{value}</span>
     </div>
   );
 }
