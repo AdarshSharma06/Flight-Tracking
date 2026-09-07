@@ -2,24 +2,20 @@ import { useEffect, useState } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { MapPin, Plane } from "lucide-react";
-
-// Fix default marker icons (leaflet asset path issue in Vite)
-const defaultIcon = L.icon({
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-});
-L.Marker.prototype.options.icon = defaultIcon;
+import { Plane } from "lucide-react";
 
 const planeIcon = L.divIcon({
-  html: '<div style="background:#7c3aed;color:white;border-radius:9999px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;">✈</div>',
+  html: '<div style="background:#38bdf8;color:#0f172a;border-radius:9999px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 15px rgba(56,189,248,0.5);transform:rotate(45deg);">✈</div>',
   className: "",
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+});
+
+const dotIcon = L.divIcon({
+  html: '<div style="background:white;border:3px solid #38bdf8;border-radius:9999px;width:16px;height:16px;"></div>',
+  className: "",
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
 });
 
 export interface MapPoint {
@@ -33,7 +29,6 @@ interface TrackingMapProps {
   live?: MapPoint | null;
   departure?: MapPoint | null;
   arrival?: MapPoint | null;
-  // optional altitude etc. for popup
   altitude?: number | null;
   speed?: number | null;
   className?: string;
@@ -46,7 +41,7 @@ function FitBounds({ points }: { points: [number, number][] }) {
     if (points.length === 1) {
       map.setView(points[0], 8);
     } else {
-      map.fitBounds(points, { padding: [40, 40] });
+      map.fitBounds(points, { padding: [60, 60] });
     }
   }, [map, points]);
   return null;
@@ -56,31 +51,10 @@ export function TrackingMap({ live, departure, arrival, altitude, speed, classNa
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const hasAny = !!live || !!departure || !!arrival;
-
   if (!mounted) {
     return (
-      <div className={`rounded-xl border bg-muted/20 flex items-center justify-center min-h-[380px] ${className ?? ""}`}>
-        <p className="text-sm text-muted-foreground">Loading map…</p>
-      </div>
-    );
-  }
-
-  if (!hasAny) {
-    return (
-      <div className={`rounded-xl border bg-card flex flex-col min-h-[380px] ${className ?? ""}`}>
-        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-3">
-          <div className="size-12 rounded-full bg-muted flex items-center justify-center">
-            <MapPin className="size-6 text-muted-foreground" />
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm font-medium">No position to display</p>
-            <p className="text-xs text-muted-foreground max-w-[32ch]">Select a flight to see its route. Live position appears only when the backend returns latitude/longitude.</p>
-          </div>
-        </div>
-        <div className="p-3 border-t bg-muted/30 rounded-b-xl">
-          <p className="text-xs text-muted-foreground text-center">Map uses OpenStreetMap via Leaflet • No API key required • Integration point: <code className="bg-background px-1 rounded border">src/components/tracking/TrackingMap.tsx</code></p>
-        </div>
+      <div className={`w-full h-full bg-black flex items-center justify-center ${className ?? ""}`}>
+        <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Initializing Cartography...</p>
       </div>
     );
   }
@@ -90,7 +64,6 @@ export function TrackingMap({ live, departure, arrival, altitude, speed, classNa
   if (live) points.push([live.lat, live.lng]);
   if (arrival) points.push([arrival.lat, arrival.lng]);
 
-  // Default center: live > departure > 0,0
   const center: [number, number] = live ? [live.lat, live.lng] : departure ? [departure.lat, departure.lng] : arrival ? [arrival.lat, arrival.lng] : [20, 0];
 
   const line: [number, number][] = [];
@@ -99,51 +72,57 @@ export function TrackingMap({ live, departure, arrival, altitude, speed, classNa
   if (arrival) line.push([arrival.lat, arrival.lng]);
 
   return (
-    <div className={`rounded-xl border overflow-hidden flex flex-col bg-card ${className ?? ""}`}>
-      <div className="h-[420px] w-full relative">
-        <MapContainer center={center} zoom={4} scrollWheelZoom className="h-full w-full" style={{ background: "#e5e7eb" }}>
-          <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          {departure && (
-            <Marker position={[departure.lat, departure.lng]}>
-              <Popup>
-                <strong>{departure.label}</strong>
-                {departure.subLabel && <><br />{departure.subLabel}</>}
-                <br />
-                {departure.lat.toFixed(3)}, {departure.lng.toFixed(3)}
-              </Popup>
-            </Marker>
-          )}
-          {arrival && (
-            <Marker position={[arrival.lat, arrival.lng]}>
-              <Popup>
-                <strong>{arrival.label}</strong>
-                {arrival.subLabel && <><br />{arrival.subLabel}</>}
-                <br />
-                {arrival.lat.toFixed(3)}, {arrival.lng.toFixed(3)}
-              </Popup>
-            </Marker>
-          )}
-          {live && (
-            <Marker position={[live.lat, live.lng]} icon={planeIcon}>
-              <Popup>
-                <div className="flex items-center gap-1.5 font-semibold"><Plane className="size-3.5" /> {live.label}</div>
-                {live.subLabel && <div className="text-xs">{live.subLabel}</div>}
-                <div className="text-xs">Lat {live.lat.toFixed(4)} • Lng {live.lng.toFixed(4)}</div>
-                {altitude != null && <div className="text-xs">Alt {altitude} m</div>}
-                {speed != null && <div className="text-xs">Speed {speed} km/h</div>}
-              </Popup>
-            </Marker>
-          )}
-          {line.length >= 2 && <Polyline positions={line} color="#7c3aed" weight={3} opacity={0.7} dashArray={live ? undefined : "6 6"} />}
-          <FitBounds points={points} />
-        </MapContainer>
-      </div>
+    <div className={`w-full h-full relative bg-black ${className ?? ""}`}>
+      <MapContainer center={center} zoom={4} scrollWheelZoom={false} className="h-full w-full bg-black z-0" zoomControl={false}>
+        <TileLayer 
+          attribution='&copy; <a href="https://carto.com/">Carto</a>' 
+          url="https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png" 
+        />
+        {departure && (
+          <Marker position={[departure.lat, departure.lng]} icon={dotIcon}>
+            <Popup className="custom-popup">
+              <div className="font-mono text-xs">
+                <strong className="block text-primary uppercase">{departure.label}</strong>
+                <span className="text-muted-foreground">{departure.subLabel}</span>
+              </div>
+            </Popup>
+          </Marker>
+        )}
+        {arrival && (
+          <Marker position={[arrival.lat, arrival.lng]} icon={dotIcon}>
+            <Popup className="custom-popup">
+              <div className="font-mono text-xs">
+                <strong className="block text-primary uppercase">{arrival.label}</strong>
+                <span className="text-muted-foreground">{arrival.subLabel}</span>
+              </div>
+            </Popup>
+          </Marker>
+        )}
+        {live && (
+          <Marker position={[live.lat, live.lng]} icon={planeIcon}>
+            <Popup className="custom-popup">
+              <div className="font-mono text-xs space-y-1">
+                <strong className="block text-primary uppercase flex items-center gap-1">
+                  <Plane className="size-3" /> {live.label}
+                </strong>
+                {altitude != null && <div className="text-muted-foreground">ALT: {altitude}m</div>}
+                {speed != null && <div className="text-muted-foreground">SPD: {speed}km/h</div>}
+              </div>
+            </Popup>
+          </Marker>
+        )}
+        {line.length >= 2 && <Polyline positions={line} color="#38bdf8" weight={2} opacity={0.6} dashArray={live ? undefined : "4 8"} />}
+        <FitBounds points={points} />
+      </MapContainer>
+      
+      {/* Map Overlay Vignette */}
+      <div className="absolute inset-0 pointer-events-none shadow-[inset_0_0_100px_rgba(0,0,0,0.8)] z-10" />
+      
       {!live && (departure || arrival) && (
-        <Alert className="rounded-none border-0 border-t">
-          <MapPin className="size-4" />
-          <AlertTitle className="text-xs">Live position unavailable</AlertTitle>
-          <AlertDescription className="text-xs">The backend returned no latitude/longitude for this flight. Route is shown with known airport locations only.</AlertDescription>
-        </Alert>
+        <div className="absolute bottom-6 right-6 z-20 glass-panel px-3 py-2 rounded-md flex items-center gap-2">
+          <div className="size-2 rounded-full bg-amber-500 animate-pulse" />
+          <span className="text-[10px] uppercase tracking-widest font-mono text-amber-500 font-semibold">Live Position Offline</span>
+        </div>
       )}
     </div>
   );

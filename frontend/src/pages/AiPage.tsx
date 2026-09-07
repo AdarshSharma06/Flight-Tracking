@@ -1,92 +1,81 @@
 import { useState, useRef, useEffect } from "react";
-import { aiService } from "@/services/ai.service";
-import { ApiError } from "@/services/api";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Bot, Send, User, AlertCircle, Loader2 } from "lucide-react";
+import { Send, Cpu, Plane, Zap, Loader2, AlertCircle } from "lucide-react";
+import { aiService } from "@/services/ai.service";
+import { ApiError } from "@/services/api";
 
-interface Message {
+type Message = {
   role: "user" | "assistant";
   content: string;
-}
+};
 
 const STARTER_PROMPTS = [
-  "What is an airport?",
-  "What is an ILS?",
-  "What does a squawk code mean?",
-  "What is the difference between altitude and flight level?",
+  "What is the current flight from JFK to LHR?",
+  "How is the weather at Dubai International?",
+  "Tell me about the Boeing 747-8.",
+  "Track flight UA123."
 ];
 
-function escapeHtml(text: string) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function formatInline(text: string) {
-  // escape then restore markdown formatting as HTML
-  let html = escapeHtml(text);
-  // inline code `code`
-  html = html.replace(/`([^`]+?)`/g, '<code class="rounded bg-muted-foreground/15 px-1 py-0.5 font-mono text-[0.85em]">$1</code>');
-  // bold **text**
-  html = html.replace(/\*\*([^*]+?)\*\*/g, '<strong class="font-semibold">$1</strong>');
-  // italic *text* (avoid bold) - simple
-  html = html.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<em>$1</em>');
-  return html;
-}
-
+// Reusing the mechanical parser but adapting class names to be more neutral for the glass-panel
 function MarkdownContent({ content }: { content: string }) {
-  const lines = content.split("\n");
   const elements: React.ReactNode[] = [];
+  const lines = content.split("\n");
   let listBuffer: { type: "ul" | "ol"; items: string[] } | null = null;
-  let inCodeBlock = false;
   let codeBuffer: string[] = [];
+  let inCodeBlock = false;
 
   const flushList = () => {
-    if (!listBuffer) return;
-    if (listBuffer.type === "ul") {
-      elements.push(
-        <ul key={`ul-${elements.length}`} className="ml-4 list-disc space-y-1 my-2">
-          {listBuffer.items.map((it, idx) => (
-            <li key={idx} className="leading-relaxed" dangerouslySetInnerHTML={{ __html: formatInline(it) }} />
-          ))}
-        </ul>
-      );
-    } else {
-      elements.push(
-        <ol key={`ol-${elements.length}`} className="ml-4 list-decimal space-y-1 my-2">
-          {listBuffer.items.map((it, idx) => (
-            <li key={idx} className="leading-relaxed" dangerouslySetInnerHTML={{ __html: formatInline(it) }} />
-          ))}
-        </ol>
-      );
+    if (listBuffer) {
+      const idx = elements.length;
+      if (listBuffer.type === "ul") {
+        elements.push(
+          <ul key={`ul-${idx}`} className="list-disc pl-5 my-2 space-y-1">
+            {listBuffer.items.map((item, i) => (
+              <li key={i} dangerouslySetInnerHTML={{ __html: formatInline(item) }} />
+            ))}
+          </ul>
+        );
+      } else {
+        elements.push(
+          <ol key={`ol-${idx}`} className="list-decimal pl-5 my-2 space-y-1">
+            {listBuffer.items.map((item, i) => (
+              <li key={i} dangerouslySetInnerHTML={{ __html: formatInline(item) }} />
+            ))}
+          </ol>
+        );
+      }
+      listBuffer = null;
     }
-    listBuffer = null;
   };
 
   const flushCode = () => {
-    if (codeBuffer.length === 0) return;
-    elements.push(
-      <pre key={`code-${elements.length}`} className="my-2 rounded-md bg-muted p-3 overflow-x-auto text-xs font-mono">
-        <code>{codeBuffer.join("\n")}</code>
-      </pre>
-    );
-    codeBuffer = [];
+    if (codeBuffer.length > 0) {
+      const idx = elements.length;
+      elements.push(
+        <pre key={`code-${idx}`} className="bg-black/50 border border-white/10 p-3 rounded-md my-2 overflow-x-auto text-xs font-mono text-white/90">
+          <code>{codeBuffer.join("\n")}</code>
+        </pre>
+      );
+      codeBuffer = [];
+      inCodeBlock = false;
+    }
   };
 
-  lines.forEach((rawLine, idx) => {
-    const line = rawLine;
+  const formatInline = (text: string) => {
+    return text
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.*?)\*/g, "<em>$1</em>")
+      .replace(/`(.*?)`/g, '<code class="bg-black/30 px-1 py-0.5 rounded text-[11px] font-mono">$1</code>');
+  };
+
+  lines.forEach((line, i) => {
+    const idx = elements.length + i;
     const trimmed = line.trim();
 
-    // code fence
     if (trimmed.startsWith("```")) {
       if (inCodeBlock) {
         flushCode();
-        inCodeBlock = false;
       } else {
         flushList();
         inCodeBlock = true;
@@ -103,7 +92,6 @@ function MarkdownContent({ content }: { content: string }) {
       return;
     }
 
-    // headings # ## ###
     if (/^#{1,3}\s+/.test(trimmed)) {
       flushList();
       const level = trimmed.match(/^#+/)![0].length;
@@ -115,7 +103,6 @@ function MarkdownContent({ content }: { content: string }) {
       return;
     }
 
-    // bullet list
     if (/^[-*•]\s+/.test(trimmed)) {
       const text = trimmed.replace(/^[-*•]\s+/, "");
       if (!listBuffer || listBuffer.type !== "ul") {
@@ -126,7 +113,6 @@ function MarkdownContent({ content }: { content: string }) {
       return;
     }
 
-    // numbered list
     if (/^\d+\.\s+/.test(trimmed)) {
       const text = trimmed.replace(/^\d+\.\s+/, "");
       if (!listBuffer || listBuffer.type !== "ol") {
@@ -137,7 +123,6 @@ function MarkdownContent({ content }: { content: string }) {
       return;
     }
 
-    // paragraph
     flushList();
     elements.push(
       <p key={`p-${idx}`} className="leading-relaxed my-1.5" dangerouslySetInnerHTML={{ __html: formatInline(trimmed) }} />
@@ -147,7 +132,6 @@ function MarkdownContent({ content }: { content: string }) {
   flushList();
   flushCode();
 
-  // fallback if no elements (empty)
   if (elements.length === 0) {
     return <span className="whitespace-pre-wrap break-words">{content}</span>;
   }
@@ -161,6 +145,7 @@ export function AiPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
+  
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -192,123 +177,110 @@ export function AiPage() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
+  const handleSend = (e: React.FormEvent) => {
+    e.preventDefault();
+    send();
   };
 
   return (
-    <div className="flex flex-col gap-4 min-h-0">
-      <div className="shrink-0 space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Bot className="size-6 text-primary" /> AI Assistant
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Ask aviation questions, search flights, and get live flight, airport, and weather information when available.
-        </p>
+    <div className="w-full flex-1 flex flex-col h-[100dvh] pt-20 bg-background relative overflow-hidden">
+      <div className="absolute inset-0 z-0 flex items-center justify-center opacity-[0.03] pointer-events-none">
+        <div className="w-[800px] h-[800px] rounded-full border-[40px] border-primary blur-3xl mix-blend-screen" />
       </div>
 
-      <Card className="flex flex-col flex-1 min-h-0 overflow-hidden" style={{ height: "min(720px, calc(100dvh - 12rem))", minHeight: "420px" }}>
-        <CardHeader className="shrink-0 pb-3">
-          <CardTitle className="text-base">Chat</CardTitle>
-          <CardDescription>
-            Powered by AI. Responses are generated and may not always be accurate.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden p-6 pt-0">
-          <div
-            ref={scrollRef}
-            className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-2 -mr-2"
-          >
-            <div className="space-y-4 py-2 pr-2">
-              {messages.length === 0 && (
-                <div className="space-y-3">
-                  <p className="text-sm text-muted-foreground">Try asking:</p>
-                  <div className="flex flex-wrap gap-2">
-                    {STARTER_PROMPTS.map((prompt) => (
-                      <Button
-                        key={prompt}
-                        variant="outline"
-                        size="sm"
-                        className="text-xs h-auto py-1.5 whitespace-normal text-left break-words"
-                        onClick={() => send(prompt)}
-                        disabled={loading}
-                      >
-                        {prompt}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {messages.map((msg, i) => (
-                <div key={i} className={`flex gap-2 min-w-0 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  {msg.role === "assistant" && (
-                    <div className="size-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                      <Bot className="size-4 text-primary" />
-                    </div>
-                  )}
-                  <div
-                    className={`rounded-lg px-3 py-2 text-sm max-w-[80%] min-w-0 break-words overflow-hidden ${
-                      msg.role === "user"
-                        ? "bg-primary text-primary-foreground whitespace-pre-wrap"
-                        : "bg-muted"
-                    }`}
-                  >
-                    {msg.role === "user" ? (
-                      <span className="whitespace-pre-wrap break-words">{msg.content}</span>
-                    ) : (
-                      <MarkdownContent content={msg.content} />
-                    )}
-                  </div>
-                  {msg.role === "user" && (
-                    <div className="size-7 rounded-full bg-primary flex items-center justify-center shrink-0 mt-0.5">
-                      <User className="size-4 text-primary-foreground" />
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {loading && (
-                <div className="flex gap-2 justify-start min-w-0">
-                  <div className="size-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <Bot className="size-4 text-primary" />
-                  </div>
-                  <div className="rounded-lg px-3 py-2 text-sm bg-muted flex items-center gap-2">
-                    <Loader2 className="size-4 animate-spin" />
-                    Thinking...
-                  </div>
-                </div>
-              )}
-            </div>
+      <div className="relative z-10 w-full max-w-4xl mx-auto flex flex-col h-full px-4 pb-6">
+        
+        <div className="flex items-center gap-3 py-6 shrink-0 border-b border-white/5">
+          <div className="size-10 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Cpu className="size-5 text-primary" />
           </div>
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight text-white">Operations Intelligence</h1>
+            <p className="text-[10px] uppercase tracking-widest font-mono text-muted-foreground flex items-center gap-1.5"><Zap className="size-3 text-primary"/> System Active</p>
+          </div>
+        </div>
 
-          {error && (
-            <Alert variant="destructive" className="shrink-0">
-              <AlertCircle className="size-4" />
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription className="text-xs break-words">{error}</AlertDescription>
-            </Alert>
+        <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar py-8 space-y-6 pr-2">
+          
+          {messages.length === 0 && (
+            <div className="space-y-4 mb-8">
+              <div className="glass-panel p-6 rounded-2xl">
+                <p className="text-sm text-foreground/80 leading-relaxed">
+                  I am your Aviation Intelligence system. I can analyze operational delays, evaluate routes, and assist with telemetry data.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {STARTER_PROMPTS.map((prompt) => (
+                  <Button
+                    key={prompt}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs h-auto py-2 whitespace-normal text-left break-words border-white/10 hover:border-primary/50 transition-colors"
+                    onClick={() => send(prompt)}
+                    disabled={loading}
+                  >
+                    {prompt}
+                  </Button>
+                ))}
+              </div>
+            </div>
           )}
 
-          <div className="flex gap-2 shrink-0">
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[85%] rounded-2xl p-5 ${msg.role === 'user' ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'glass-panel rounded-tl-sm'}`}>
+                {msg.role === 'assistant' && (
+                  <div className="flex items-center gap-2 mb-3 text-[10px] uppercase tracking-widest font-bold opacity-70">
+                    <Plane className="size-3" /> System
+                  </div>
+                )}
+                <div className={`text-sm leading-relaxed ${msg.role === 'user' ? 'text-primary-foreground whitespace-pre-wrap' : 'text-foreground/90'}`}>
+                  {msg.role === 'user' ? msg.content : <MarkdownContent content={msg.content} />}
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {loading && (
+            <div className="flex justify-start">
+              <div className="max-w-[80%] rounded-2xl p-5 glass-panel rounded-tl-sm flex items-center gap-3">
+                <Loader2 className="size-4 animate-spin text-primary" />
+                <span className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Synthesizing...</span>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="flex justify-center">
+              <div className="max-w-[80%] rounded-2xl p-3 border border-destructive/30 bg-destructive/10 flex items-center gap-3">
+                <AlertCircle className="size-4 text-destructive" />
+                <span className="text-xs text-destructive">{error}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="shrink-0 pt-4">
+          <form onSubmit={handleSend} className="relative glass-panel-heavy rounded-2xl p-2 shadow-2xl flex items-center gap-2">
             <Input
               ref={inputRef}
-              placeholder="Ask a question about aviation..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
+              placeholder="Query aviation data, flight paths, or meteorological impacts..."
+              className="flex-1 bg-transparent border-0 h-12 focus-visible:ring-0 text-sm shadow-none placeholder:text-muted-foreground"
               disabled={loading}
               maxLength={4000}
             />
-            <Button onClick={() => send()} disabled={loading || !input.trim()} size="icon" className="shrink-0">
+            <Button type="submit" disabled={loading || !input.trim()} size="icon" className="size-10 shrink-0 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90">
               <Send className="size-4" />
             </Button>
+          </form>
+          <div className="text-center mt-3 text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+            Intelligence models can produce inaccurate assessments. Verify critical telemetry.
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+      </div>
     </div>
   );
 }

@@ -3,15 +3,8 @@ import { flightService } from "@/services/flight.service";
 import { ApiError } from "@/services/api";
 import type { FlightDto } from "@/types/api";
 import { AircraftViewer } from "@/components/aircraft/AircraftViewer";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
-import { Plane, Search, AlertCircle, Info, Wrench, Box } from "lucide-react";
+import { Search, Eye, AlertCircle, Loader2 } from "lucide-react";
 
 export function AircraftPage() {
   const [flightIata, setFlightIata] = useState("");
@@ -19,7 +12,8 @@ export function AircraftPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const doSearch = async () => {
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
     const q = flightIata.trim();
     if (!q) {
       setError("Enter a flight IATA (e.g., LH400) to inspect its aircraft.");
@@ -44,83 +38,81 @@ export function AircraftPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><Plane className="size-6 text-primary" /> Aircraft</h1>
-        <p className="text-sm text-muted-foreground">No dedicated <code className="bg-muted px-1 rounded">/api/aircraft</code> endpoint — aircraft data comes from <code className="bg-muted px-1 rounded">FlightDto</code> (<code className="bg-muted px-1 rounded">aircraftRegistration/Iata/Icao</code>). Viewer is a procedural foundation.</p>
+    <div className="w-full flex-1 flex flex-col h-[100dvh] pt-20 bg-background relative overflow-hidden">
+      
+      {/* 3D Viewer Area - Absolute positioned for full immersion */}
+      <div className="absolute inset-0 z-0 bg-gradient-to-tr from-background via-background/90 to-primary/10 flex items-center justify-center pt-20 pointer-events-auto">
+        <AircraftViewer />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-        <Card className="overflow-hidden">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2"><Box className="size-4" /> 3D Aircraft Viewer</CardTitle>
-            <CardDescription>Orbit • Zoom • Rotate • Procedural fuselage/wings. Replace asset at <code className="bg-muted px-1 rounded">public/models/aircraft.glb</code> (see docs).</CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            <AircraftViewer />
-          </CardContent>
-        </Card>
+      <div className="relative z-10 w-full h-full flex flex-col pointer-events-none p-6 pb-12 lg:p-12">
+        {/* Top Controls */}
+        <div className="flex items-start justify-between pointer-events-auto">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-semibold tracking-tight text-white">Equipment Registry</h1>
+            <p className="text-xs uppercase tracking-widest font-mono text-muted-foreground">3D Fleet Visualization</p>
+          </div>
 
-        <div className="space-y-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2"><Search className="size-4" /> Inspect aircraft via flight</CardTitle>
-              <CardDescription className="text-xs">Enter a flight to load its aircraft fields — no fake registry.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="air-flight">Flight IATA</Label>
-                <div className="flex gap-2">
-                  <Input id="air-flight" placeholder="LH400" value={flightIata} onChange={(e) => setFlightIata(e.target.value)} className="font-mono" />
-                  <Button onClick={doSearch} disabled={loading} className="gap-2">{loading ? <Skeleton className="size-4 rounded-full" /> : <Search className="size-4" />}Inspect</Button>
-                </div>
-              </div>
-              {error && <Alert variant="destructive"><AlertCircle className="size-4" /><AlertTitle>Error</AlertTitle><AlertDescription className="text-xs">{error}</AlertDescription></Alert>}
-              {loading && <Skeleton className="h-24 w-full" />}
-              {!loading && !flight && !error && (
-                <Alert>
-                  <Info className="size-4" />
-                  <AlertTitle className="text-xs">No aircraft selected</AlertTitle>
-                  <AlertDescription className="text-xs">Search a flight to see its aircraft. Viewer above is independent of search.</AlertDescription>
-                </Alert>
-              )}
-              {flight && (
-                <Card className="bg-muted/30">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2"><Wrench className="size-4" /> Aircraft details</CardTitle>
-                    <CardDescription className="text-xs">From <code className="bg-background px-1 rounded border">GET /api/flights/search</code> • flight <code className="bg-background px-1 rounded border">{flight.flightIata ?? flight.flightNumber}</code></CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-xs">
-                    <div className="flex justify-between"><span className="text-muted-foreground">Registration</span><span className="font-mono font-medium">{flight.aircraftRegistration ?? "—"}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">IATA</span><span className="font-mono">{flight.aircraftIata ?? "—"}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">ICAO</span><span className="font-mono">{flight.aircraftIcao ?? "—"}</span></div>
-                    <Separator />
-                    <div className="flex justify-between"><span className="text-muted-foreground">Airline</span><span>{flight.airlineName ?? flight.airlineIata ?? "—"}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">Flight status</span><Badge variant="outline" className="text-[10px]">{flight.status ?? "—"}</Badge></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">Route</span><span>{flight.departureIata ?? "—"} → {flight.arrivalIata ?? "—"}</span></div>
-                  </CardContent>
-                </Card>
-              )}
-            </CardContent>
-          </Card>
+          <form onSubmit={handleSearch} className="glass-panel rounded flex items-center p-1 w-72 transition-colors focus-within:border-primary/50">
+            <Search className="size-4 text-muted-foreground ml-3 shrink-0" />
+            <Input
+              value={flightIata}
+              onChange={(e) => setFlightIata(e.target.value)}
+              placeholder="Flight IATA (e.g. LH400)"
+              className="border-0 bg-transparent text-white placeholder:text-white/40 focus-visible:ring-0 text-xs shadow-none font-mono h-8 uppercase"
+              disabled={loading}
+            />
+            {loading && <Loader2 className="size-4 text-primary mr-3 animate-spin shrink-0" />}
+          </form>
+        </div>
 
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">How to add a real model</CardTitle></CardHeader>
-            <CardContent className="text-xs text-muted-foreground space-y-2">
-              <p>1. Obtain a licensed <code className="bg-muted px-1 rounded">.glb</code> (e.g., CC0 from Sketchfab/Poly Pizza).</p>
-              <p>2. Place at <code className="bg-muted px-1 rounded">frontend/public/models/aircraft.glb</code>.</p>
-              <p>3. In <code className="bg-muted px-1 rounded">AircraftViewer.tsx</code> replace <code className="bg-muted px-1 rounded">ProceduralAircraft</code> with <code className="bg-muted px-1 rounded">useGLTF("/models/aircraft.glb")</code> from <code className="bg-muted px-1 rounded">@react-three/drei</code>.</p>
-              <p className="text-[11px]">Current viewer uses pure Three.js primitives — no external asset, no licensing risk.</p>
-            </CardContent>
-          </Card>
+        {error && (
+          <div className="pointer-events-auto mt-4 max-w-sm rounded p-3 border border-destructive/30 bg-destructive/10 flex items-center gap-3">
+            <AlertCircle className="size-4 text-destructive shrink-0" />
+            <span className="text-xs text-destructive">{error}</span>
+          </div>
+        )}
+
+        {/* Floating Metadata (Bottom Left) */}
+        <div className="mt-auto max-w-sm glass-panel p-6 rounded-lg pointer-events-auto space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="size-10 rounded bg-white/5 flex items-center justify-center">
+              <Eye className="size-5 text-primary" />
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Registration</p>
+              <p className="font-mono text-lg font-bold text-white uppercase">
+                {flight ? (flight.aircraftRegistration ?? "UNKNOWN") : "AWAITING QUERY"}
+              </p>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/5">
+            <div className="space-y-1">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">IATA / ICAO</p>
+              <p className="font-mono text-xs text-white uppercase">{flight?.aircraftIata ?? "—"} / {flight?.aircraftIcao ?? "—"}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Airline</p>
+              <p className="font-mono text-xs text-white uppercase">{flight?.airlineName ?? flight?.airlineIata ?? "—"}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Flight Route</p>
+              <p className="font-mono text-xs text-white uppercase">{flight ? `${flight.departureIata ?? "?"} → ${flight.arrivalIata ?? "?"}` : "—"}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Flight Status</p>
+              <p className="font-mono text-xs text-white uppercase">{flight?.status ?? "—"}</p>
+            </div>
+          </div>
+
+          {!flight && (
+            <div className="text-[10px] text-muted-foreground leading-relaxed mt-2">
+              Enter a live flight identifier above to extract assigned aircraft telemetry. 3D procedural matrix is independent.
+            </div>
+          )}
         </div>
       </div>
-
-      <Alert>
-        <Plane className="size-4" />
-        <AlertTitle className="text-xs">Backend limitation noted</AlertTitle>
-        <AlertDescription className="text-xs">There is no standalone aircraft table/API. All aircraft fields are derived from flight DTOs. Do not invent <code className="bg-background px-1 rounded border">GET /api/aircraft</code> — viewer foundation will support real model later.</AlertDescription>
-      </Alert>
     </div>
   );
 }

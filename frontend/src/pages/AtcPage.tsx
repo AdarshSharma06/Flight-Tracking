@@ -1,468 +1,248 @@
 import { useEffect, useState } from "react";
-import { atcService } from "@/services/atc.service";
-import { weatherService } from "@/services/weather.service";
-import { ApiError } from "@/services/api";
-import type { AnomalyResponse, AtcExplanationResponse, PageResponse, TelemetryResponse, WeatherDto } from "@/types/api";
-import { TrackingMap } from "@/components/tracking/TrackingMap";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Radar, ShieldAlert, Gauge, Navigation, MapPin, Clock, AlertCircle, RefreshCw, Plane, Thermometer, Wind, Droplets, Sparkles, Bot } from "lucide-react";
-
-function isPageResponse<T>(v: unknown): v is PageResponse<T> {
-  return typeof v === "object" && v !== null && "content" in v && "page" in v;
-}
-
-function severityVariant(s: string): "default" | "secondary" | "outline" {
-  const v = s.toUpperCase();
-  if (v === "CRITICAL") return "default";
-  if (v === "HIGH") return "default";
-  if (v === "MEDIUM") return "secondary";
-  return "outline";
-}
-function statusVariant(s: string): "default" | "secondary" | "outline" {
-  const v = s.toUpperCase();
-  if (v === "OPEN") return "secondary";
-  if (v === "INVESTIGATING") return "secondary";
-  if (v === "RESOLVED") return "default";
-  return "outline";
-}
+import { Radar, AlertTriangle, Radio, Database, ShieldAlert, CheckCircle2, Sparkles, Loader2, Bot } from "lucide-react";
+import { atcService } from "@/services/atc.service";
+import type { TelemetryResponse, AnomalyResponse, AtcExplanationResponse } from "@/types/api";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 export function AtcPage() {
+  const { user, hasRole } = useAuth();
+  
   const [telemetry, setTelemetry] = useState<TelemetryResponse[]>([]);
-  const [telemetryPage, setTelemetryPage] = useState<PageResponse<TelemetryResponse> | null>(null);
   const [anomalies, setAnomalies] = useState<AnomalyResponse[]>([]);
-  const [anomaliesPage, setAnomaliesPage] = useState<PageResponse<AnomalyResponse> | null>(null);
-  const [selected, setSelected] = useState<TelemetryResponse | null>(null);
-  const [weather, setWeather] = useState<WeatherDto | null>(null);
-  const [loadingWeather, setLoadingWeather] = useState(false);
-  const [weatherError, setWeatherError] = useState<string | null>(null);
-  const [filterFlight, setFilterFlight] = useState("");
-  const [loadingTelemetry, setLoadingTelemetry] = useState(false);
-  const [loadingAnomalies, setLoadingAnomalies] = useState(false);
-  const [errorTelemetry, setErrorTelemetry] = useState<string | null>(null);
-  const [errorAnomalies, setErrorAnomalies] = useState<string | null>(null);
-  const [updatingId, setUpdatingId] = useState<number | null>(null);
-  const [telemetryPageIdx, setTelemetryPageIdx] = useState(0);
-  const [anomaliesPageIdx, setAnomaliesPageIdx] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // AI Explanation State
   const [explainingId, setExplainingId] = useState<number | null>(null);
   const [explanation, setExplanation] = useState<AtcExplanationResponse | null>(null);
   const [showExplanation, setShowExplanation] = useState(false);
 
-  const fetchTelemetry = async (page = 0) => {
-    setLoadingTelemetry(true);
-    setErrorTelemetry(null);
-    try {
-      const res = await atcService.listTelemetry({ flightNumber: filterFlight.trim() || undefined, page, size: 10 });
-      if (isPageResponse<TelemetryResponse>(res)) {
-        setTelemetry(res.content);
-        setTelemetryPage(res);
-        setTelemetryPageIdx(res.page);
-      } else {
-        setTelemetry(res as TelemetryResponse[]);
-        setTelemetryPage(null);
-      }
-      // auto-select first if none selected
-      if (!selected && Array.isArray(res) && res.length > 0) {
-        // not paginated array case
-        const first = (res as TelemetryResponse[])[0];
-        if (first) setSelected(first);
-      } else if (isPageResponse<TelemetryResponse>(res) && res.content.length > 0 && !selected) {
-        setSelected(res.content[0]);
-      }
-    } catch (e) {
-      if (e instanceof ApiError) {
-        if (e.status === 401) setErrorTelemetry("Authentication required. Please login as ATC_EMPLOYEE.");
-        else if (e.status === 403) setErrorTelemetry("Access denied — ATC_EMPLOYEE role required (backend enforces).");
-        else setErrorTelemetry(e.message);
-      } else setErrorTelemetry("Failed to load telemetry.");
-    } finally {
-      setLoadingTelemetry(false);
-    }
-  };
-
-  const fetchAnomalies = async (page = 0) => {
-    setLoadingAnomalies(true);
-    setErrorAnomalies(null);
-    try {
-      const res = await atcService.listAnomalies({ flightNumber: filterFlight.trim() || undefined, page, size: 10 });
-      if (isPageResponse<AnomalyResponse>(res)) {
-        setAnomalies(res.content);
-        setAnomaliesPage(res);
-        setAnomaliesPageIdx(res.page);
-      } else {
-        setAnomalies(res as AnomalyResponse[]);
-        setAnomaliesPage(null);
-      }
-    } catch (e) {
-      if (e instanceof ApiError) {
-        if (e.status === 401) setErrorAnomalies("Authentication required.");
-        else if (e.status === 403) setErrorAnomalies("Access denied — ATC_EMPLOYEE role required.");
-        else setErrorAnomalies(e.message);
-      } else setErrorAnomalies("Failed to load anomalies.");
-    } finally {
-      setLoadingAnomalies(false);
-    }
-  };
-
   useEffect(() => {
-    fetchTelemetry(0);
-    fetchAnomalies(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (selected?.latitude != null && selected?.longitude != null) {
-      setLoadingWeather(true);
-      setWeatherError(null);
-      setWeather(null);
-      weatherService
-        .getByCoordinates(selected.latitude, selected.longitude)
-        .then(setWeather)
-        .catch((e) => {
-          if (e instanceof ApiError) setWeatherError(e.message);
-          else setWeatherError("Weather unavailable.");
-        })
-        .finally(() => setLoadingWeather(false));
-    } else {
-      setWeather(null);
-      setWeatherError(null);
+    if (hasRole("ATC_EMPLOYEE")) {
+      fetchData();
     }
-  }, [selected]);
+  }, [hasRole]);
 
-  const handleFilter = () => {
-    fetchTelemetry(0);
-    fetchAnomalies(0);
-  };
-
-  const handleStatusUpdate = async (id: number, newStatus: string) => {
-    setUpdatingId(id);
+  const fetchData = async () => {
+    setLoading(true);
     try {
-      const updated = await atcService.updateAnomalyStatus(id, newStatus);
-      setAnomalies((prev) => prev.map((a) => (a.id === id ? updated : a)));
-    } catch (e) {
-      if (e instanceof ApiError) alert(`Status update failed: ${e.message}`);
-      else alert("Status update failed.");
+      const [telRes, anRes] = await Promise.all([
+        atcService.listTelemetryPaginated(undefined, 0, 20),
+        atcService.listAnomaliesPaginated(undefined, 0, 20)
+      ]);
+      setTelemetry(telRes.content);
+      setAnomalies(anRes.content);
+    } catch (e: any) {
+      setError(e.message || "Failed to load ATC data");
     } finally {
-      setUpdatingId(null);
+      setLoading(false);
     }
   };
 
-  const handleExplain = async (anomalyId: number) => {
-    setExplainingId(anomalyId);
-    setExplanation(null);
+  const handleStatusUpdate = async (id: number, status: string) => {
+    try {
+      await atcService.updateAnomalyStatus(id, status);
+      fetchData();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleExplain = async (id: number) => {
+    setExplainingId(id);
     setShowExplanation(true);
+    setExplanation(null);
     try {
-      const res = await atcService.explainAnomaly(anomalyId);
+      const res = await atcService.explainAnomaly(id);
       setExplanation(res);
     } catch (e) {
-      let msg = "AI explanation is currently unavailable.";
-      if (e instanceof ApiError) msg = e.message;
-      setExplanation({
-        explanation: msg,
-        anomalyId,
-        flightNumber: null,
-        facts: [],
-        context: [],
-        limitations: [msg],
-      });
+      console.error(e);
+      setShowExplanation(false);
     } finally {
       setExplainingId(null);
     }
   };
 
-  const livePoint = selected?.latitude != null && selected?.longitude != null ? { lat: selected.latitude, lng: selected.longitude, label: selected.flightIata ?? selected.flightNumber, subLabel: selected.flightStatus ?? undefined } : null;
-  const depPoint = null; // no departure coordinates in telemetryResponse, would require airport lookup by originIata
-  const arrPoint = null;
+  if (!hasRole("ATC_EMPLOYEE")) {
+    return (
+      <div className="w-full min-h-[100dvh] pt-20 flex items-center justify-center bg-background">
+        <div className="glass-panel p-8 rounded-xl max-w-md text-center space-y-4 border-destructive/30">
+          <ShieldAlert className="size-12 text-destructive mx-auto" />
+          <h1 className="text-xl font-mono text-white">ACCESS DENIED</h1>
+          <p className="text-sm text-muted-foreground">You do not have the required ATC_EMPLOYEE clearance to access this terminal.</p>
+        </div>
+      </div>
+    );
+  }
 
-  // For map, we could optionally fetch airport coords for origin/destination if needed, but spec says no fake coords — so only live point
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><Radar className="size-6 text-primary" /> ATC Operations</h1>
-        <p className="text-sm text-muted-foreground">Role-gated dashboard via <code className="bg-muted px-1 rounded">GET /api/atc/telemetry</code> + <code className="bg-muted px-1 rounded">GET /api/atc/anomalies</code> + <code className="bg-muted px-1 rounded">PATCH /api/atc/anomalies/{"{id}"}/status</code>. Backend authoritative.</p>
-      </div>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Filter & connection</CardTitle>
-          <CardDescription className="text-xs">Optional flight filter — backend supports <code className="bg-muted px-1 rounded">?flightNumber=</code>. Pagination via <code className="bg-muted px-1 rounded">page/size</code>.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-3 items-end">
-          <div className="space-y-1.5">
-            <Label htmlFor="atc-flight">Flight number</Label>
-            <Input id="atc-flight" placeholder="e.g., LH400" value={filterFlight} onChange={(e) => setFilterFlight(e.target.value)} className="w-[200px] font-mono" />
+    <div className="w-full min-h-[100dvh] pt-20 bg-background flex flex-col">
+      <div className="flex-1 w-full flex flex-col lg:flex-row h-full">
+        {/* Control Panel */}
+        <div className="w-full lg:w-72 bg-background border-r border-white/5 flex flex-col p-6 space-y-8 overflow-y-auto custom-scrollbar">
+          <div className="space-y-1">
+            <h1 className="text-xl font-semibold tracking-tight text-white flex items-center gap-2">
+              <Radar className="size-5 text-primary" /> ATC Core
+            </h1>
+            <p className="text-[10px] uppercase tracking-widest font-mono text-muted-foreground text-primary/70">Secure Terminal</p>
           </div>
-          <Button onClick={handleFilter} className="gap-2"><RefreshCw className="size-4" /> Apply</Button>
-          <Button variant="outline" onClick={() => { setFilterFlight(""); fetchTelemetry(0); fetchAnomalies(0); }}>Clear</Button>
-          <div className="ml-auto flex items-center gap-2 text-xs">
-            <span className="flex items-center gap-1.5"><span className={`size-2 rounded-full ${errorTelemetry || errorAnomalies ? "bg-destructive" : "bg-emerald-500"}`} /> {errorTelemetry || errorAnomalies ? "Error" : "Connected"}</span>
-            {selected && <Badge variant="secondary" className="font-mono text-[11px]">{selected.flightNumber}</Badge>}
-          </div>
-        </CardContent>
-      </Card>
 
-      <div className="grid gap-6 lg:grid-cols-[1.7fr_1fr] items-start">
-        <div className="space-y-6">
-          <TrackingMap live={livePoint} departure={depPoint} arrival={arrPoint} altitude={selected?.altitude} speed={selected?.speed} />
-          <Alert>
-            <Navigation className="size-4" />
-            <AlertTitle className="text-xs">Historical path</AlertTitle>
-            <AlertDescription className="text-xs">Backend provides only latest telemetry point per record (lat/lng + heading). Historical path data unavailable — no polyline fabricated. Map shows selected aircraft only.</AlertDescription>
-          </Alert>
+          <div className="space-y-4">
+            <h2 className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground border-b border-white/5 pb-2">Operator</h2>
+            <div className="space-y-1">
+              <p className="font-mono text-xs text-white uppercase">{user?.username}</p>
+              <p className="font-mono text-[10px] text-primary">{user?.role}</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h2 className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground border-b border-white/5 pb-2">Subsystems</h2>
+            <nav className="flex flex-col gap-1">
+              <Button variant="ghost" className="justify-start gap-3 h-9 px-2 text-xs font-mono uppercase tracking-wider bg-white/5 text-white hover:bg-white/10"><Radio className="size-3 text-primary" /> Active Terminal</Button>
+              <Button variant="ghost" className="justify-start gap-3 h-9 px-2 text-xs font-mono uppercase tracking-wider text-muted-foreground hover:bg-white/5" onClick={fetchData}><Database className="size-3" /> Refresh Data</Button>
+            </nav>
+          </div>
         </div>
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2"><Gauge className="size-4" /> Selected telemetry</CardTitle>
-              <CardDescription className="text-xs">{selected ? `ID ${selected.id} • ${selected.flightNumber}` : "Select a record below."}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {!selected && <Alert><AlertCircle className="size-4" /><AlertTitle className="text-xs">No selection</AlertTitle><AlertDescription className="text-xs">Choose a telemetry record from the list below.</AlertDescription></Alert>}
-              {selected && (
-                <div className="space-y-2 text-xs">
-                  <div className="flex justify-between"><span className="text-muted-foreground">Flight</span><span className="font-mono font-medium">{selected.flightNumber} {selected.flightIata ? `(${selected.flightIata})` : ""}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">ICAO</span><span className="font-mono">{selected.flightIcao ?? "—"}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Airline</span><span>{selected.airlineIata ?? "—"}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Origin → Dest</span><span className="font-mono">{selected.originIata ?? "—"} → {selected.destinationIata ?? "—"}</span></div>
-                  <Separator />
-                  <div className="flex justify-between"><span className="text-muted-foreground flex items-center gap-1"><MapPin className="size-3" /> Lat/Lng</span><span className="font-mono">{selected.latitude != null && selected.longitude != null ? `${selected.latitude.toFixed(4)}, ${selected.longitude.toFixed(4)}` : "— (Live position unavailable)"}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Altitude</span><span>{selected.altitude != null ? `${selected.altitude} ft` : "—"}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Speed</span><span>{selected.speed != null ? `${selected.speed} kts` : "—"}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Direction</span><span>{selected.direction != null ? `${selected.direction}°` : "—"}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Heading</span><span>{selected.heading != null ? `${selected.heading}°` : "—"}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Status</span><Badge variant="outline" className="text-[10px]">{selected.flightStatus ?? "—"}</Badge></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Route</span><span className="text-right max-w-[160px] truncate">{selected.routeInfo ?? "—"}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Aircraft</span><span className="font-mono">{selected.aircraftRegistration ?? "—"}</span></div>
-                  <Separator />
-                  <div className="flex justify-between"><span className="text-muted-foreground flex items-center gap-1"><Clock className="size-3" /> Recorded</span><span>{selected.recordedAt ? new Date(selected.recordedAt).toLocaleString() : "—"}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Created</span><span>{new Date(selected.createdAt).toLocaleString()}</span></div>
-                  {!selected.latitude && <Alert><AlertCircle className="size-4" /><AlertTitle className="text-xs">Live position unavailable</AlertTitle><AlertDescription className="text-xs">This record has no coordinates — map shows empty state, not fabricated.</AlertDescription></Alert>}
+        {/* Dashboard Grid */}
+        <div className="flex-1 bg-black p-6 flex flex-col relative overflow-hidden">
+          {/* Subtle grid background to simulate radar screen environment */}
+          <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none" />
+
+          <div className="relative z-10 flex-1 grid grid-cols-1 xl:grid-cols-3 gap-6">
+            
+            {/* Main Sector Info */}
+            <div className="xl:col-span-2 flex flex-col gap-6">
+              <div className="glass-panel border-primary/20 rounded p-6 flex items-center justify-between">
+                <div>
+                  <h3 className="text-[10px] uppercase tracking-widest font-bold text-primary mb-1">Sector Alpha Status</h3>
+                  <p className="font-mono text-2xl text-white">{error ? "ERROR" : anomalies.length > 0 ? "DEGRADED" : "NOMINAL"}</p>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2"><Thermometer className="size-4" /> Weather at position</CardTitle>
-              <CardDescription className="text-xs">Via <code className="bg-muted px-1 rounded">GET /api/weather?latitude&longitude</code></CardDescription>
-            </CardHeader>
-            <CardContent>
-              {!selected && <p className="text-xs text-muted-foreground">Select a telemetry record.</p>}
-              {selected && (selected.latitude == null || selected.longitude == null) && <p className="text-xs text-muted-foreground">No coordinates — weather unavailable.</p>}
-              {selected && selected.latitude != null && selected.longitude != null && (
-                <>
-                  {loadingWeather && <Skeleton className="h-16 w-full" />}
-                  {weatherError && <Alert variant="destructive"><AlertCircle className="size-4" /><AlertTitle>Weather error</AlertTitle><AlertDescription className="text-xs">{weatherError}</AlertDescription></Alert>}
-                  {!loadingWeather && weather && (
-                    <div className="grid grid-cols-2 gap-3 text-xs">
-                      <div className="rounded-lg border bg-muted/20 p-2"><div className="text-muted-foreground flex items-center gap-1"><Thermometer className="size-3" /> Temp</div><div className="font-semibold">{weather.temperature}°C</div><div className="text-muted-foreground">{weather.weatherCondition ?? "—"}</div></div>
-                      <div className="rounded-lg border p-2"><div className="text-muted-foreground flex items-center gap-1"><Wind className="size-3" /> Wind</div><div className="font-semibold">{weather.windSpeed ?? "—"} km/h</div></div>
-                      <div className="rounded-lg border p-2"><div className="text-muted-foreground flex items-center gap-1"><Droplets className="size-3" /> Precip</div><div className="font-semibold">{weather.precipitation ?? "—"} mm</div></div>
-                      <div className="rounded-lg border p-2"><div className="text-muted-foreground">Humidity</div><div className="font-semibold">{weather.humidity ?? "—"}%</div></div>
-                    </div>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      <Tabs defaultValue="telemetry">
-        <TabsList>
-          <TabsTrigger value="telemetry" className="gap-1.5"><Plane className="size-3.5" /> Telemetry {telemetryPage ? `(${telemetryPage.totalElements})` : telemetry.length ? `(${telemetry.length})` : ""}</TabsTrigger>
-          <TabsTrigger value="anomalies" className="gap-1.5"><ShieldAlert className="size-3.5" /> Anomalies {anomaliesPage ? `(${anomaliesPage.totalElements})` : anomalies.length ? `(${anomalies.length})` : ""}</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="telemetry" className="mt-4 space-y-3">
-          {loadingTelemetry && <Skeleton className="h-32 w-full" />}
-          {errorTelemetry && <Alert variant="destructive"><AlertCircle className="size-4" /><AlertTitle>Telemetry error</AlertTitle><AlertDescription className="text-xs">{errorTelemetry}</AlertDescription></Alert>}
-          {!loadingTelemetry && telemetry.length === 0 && !errorTelemetry && (
-            <Alert><AlertCircle className="size-4" /><AlertTitle>No telemetry</AlertTitle><AlertDescription className="text-xs">No records. Create via <code className="bg-background px-1 rounded border">POST /api/atc/telemetry</code> (ATC only) or adjust filter.</AlertDescription></Alert>
-          )}
-          {telemetry.length > 0 && (
-            <Card>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-xs">Flight</TableHead>
-                        <TableHead className="text-xs">Origin→Dest</TableHead>
-                        <TableHead className="text-xs">Pos</TableHead>
-                        <TableHead className="text-xs">Alt/Speed</TableHead>
-                        <TableHead className="text-xs">Status</TableHead>
-                        <TableHead className="text-xs"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {telemetry.map((t) => (
-                        <TableRow key={t.id} className={selected?.id === t.id ? "bg-muted/50" : ""}>
-                          <TableCell className="font-mono text-xs">{t.flightNumber}<div className="text-[11px] text-muted-foreground">{t.flightIata ?? ""}</div></TableCell>
-                          <TableCell className="text-xs font-mono">{t.originIata ?? "—"}→{t.destinationIata ?? "—"}</TableCell>
-                          <TableCell className="text-xs">{t.latitude != null && t.longitude != null ? `${t.latitude.toFixed(2)},${t.longitude.toFixed(2)}` : <span className="text-muted-foreground">—</span>}</TableCell>
-                          <TableCell className="text-xs">{t.altitude ?? "—"} / {t.speed ?? "—"}</TableCell>
-                          <TableCell><Badge variant="outline" className="text-[10px]">{t.flightStatus ?? "—"}</Badge></TableCell>
-                          <TableCell><Button size="sm" variant={selected?.id === t.id ? "secondary" : "ghost"} className="h-7 text-xs" onClick={() => setSelected(t)}>Select</Button></TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                <div className="text-right">
+                  <h3 className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1">Active Targets</h3>
+                  <p className="font-mono text-2xl text-white">{telemetry.length}</p>
                 </div>
-              </CardContent>
-            </Card>
-          )}
-          {telemetryPage && telemetryPage.totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 text-xs">
-              <Button variant="outline" size="sm" disabled={telemetryPageIdx === 0} onClick={() => fetchTelemetry(telemetryPageIdx - 1)}>Prev</Button>
-              <span>Page {telemetryPage.page + 1} / {telemetryPage.totalPages}</span>
-              <Button variant="outline" size="sm" disabled={telemetryPage.last} onClick={() => fetchTelemetry(telemetryPageIdx + 1)}>Next</Button>
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="anomalies" className="mt-4 space-y-3">
-          {loadingAnomalies && <Skeleton className="h-32 w-full" />}
-          {errorAnomalies && <Alert variant="destructive"><AlertCircle className="size-4" /><AlertTitle>Anomalies error</AlertTitle><AlertDescription className="text-xs">{errorAnomalies}</AlertDescription></Alert>}
-          {!loadingAnomalies && anomalies.length === 0 && !errorAnomalies && (
-            <Alert><AlertCircle className="size-4" /><AlertTitle>No anomalies</AlertTitle><AlertDescription className="text-xs">No anomaly records. Backend provides real data only.</AlertDescription></Alert>
-          )}
-          {anomalies.length > 0 && (
-            <Card>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-xs">Flight</TableHead>
-                        <TableHead className="text-xs">Type</TableHead>
-                        <TableHead className="text-xs">Severity</TableHead>
-                        <TableHead className="text-xs">Status</TableHead>
-                        <TableHead className="text-xs">Description</TableHead>
-                        <TableHead className="text-xs">Update</TableHead>
-                        <TableHead className="text-xs"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {anomalies.map((a) => (
-                        <TableRow key={a.id}>
-                          <TableCell className="font-mono text-xs">{a.flightNumber}<div className="text-[11px] text-muted-foreground">{a.flightIata ?? ""}</div></TableCell>
-                          <TableCell className="text-xs">{a.anomalyType}</TableCell>
-                          <TableCell><Badge variant={severityVariant(a.severity)} className="text-[10px]">{a.severity}</Badge></TableCell>
-                          <TableCell><Badge variant={statusVariant(a.status)} className="text-[10px]">{a.status}</Badge></TableCell>
-                          <TableCell className="text-xs max-w-[220px] truncate" title={a.description ?? ""}>{a.description ?? "—"}</TableCell>
-                          <TableCell>
-                            <Select value={a.status} onValueChange={(v) => handleStatusUpdate(a.id, v ?? a.status)} disabled={updatingId === a.id}>
-                              <SelectTrigger className="w-[160px] h-7 text-xs"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="OPEN">OPEN</SelectItem>
-                                <SelectItem value="INVESTIGATING">INVESTIGATING</SelectItem>
-                                <SelectItem value="RESOLVED">RESOLVED</SelectItem>
-                                <SelectItem value="FALSE_POSITIVE">FALSE_POSITIVE</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs gap-1"
-                              onClick={() => handleExplain(a.id)}
-                              disabled={explainingId === a.id}
-                            >
-                              {explainingId === a.id ? <Skeleton className="size-3" /> : <Sparkles className="size-3" />}
-                              Explain
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-          {anomaliesPage && anomaliesPage.totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 text-xs">
-              <Button variant="outline" size="sm" disabled={anomaliesPageIdx === 0} onClick={() => fetchAnomalies(anomaliesPageIdx - 1)}>Prev</Button>
-              <span>Page {anomaliesPage.page + 1} / {anomaliesPage.totalPages}</span>
-              <Button variant="outline" size="sm" disabled={anomaliesPage.last} onClick={() => fetchAnomalies(anomaliesPageIdx + 1)}>Next</Button>
-            </div>
-          )}
-          <p className="text-[11px] text-muted-foreground">PATCH via <code className="bg-muted px-1 rounded">/api/atc/anomalies/{"{id}"}/status</code> with <code className="bg-muted px-1 rounded">{"{ status }"}</code> body. Frontend shows real <code className="bg-muted px-1 rounded">AnomalySeverity</code> + <code className="bg-muted px-1 rounded">AnomalyStatus</code> enums.</p>
-        </TabsContent>
-      </Tabs>
-
-      <Dialog open={showExplanation} onOpenChange={setShowExplanation}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Bot className="size-5" /> AI Explanation
-            </DialogTitle>
-            <DialogDescription>
-              Grounded explanation of anomaly data — not anomaly detection.
-            </DialogDescription>
-          </DialogHeader>
-
-          {explainingId && (
-            <div className="space-y-3 py-4">
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-4 w-1/2" />
-              <Skeleton className="h-20 w-full" />
-            </div>
-          )}
-
-          {explanation && !explainingId && (
-            <div className="space-y-4 text-sm">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-1">Explanation</p>
-                <p className="whitespace-pre-wrap leading-relaxed">{explanation.explanation}</p>
               </div>
 
-              {explanation.facts.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1">Measured Facts</p>
-                  <ul className="list-disc list-inside space-y-0.5 text-xs">
-                    {explanation.facts.map((f, i) => <li key={i}>{f}</li>)}
-                  </ul>
+              {/* Data Table */}
+              <div className="glass-panel rounded flex-1 overflow-hidden flex flex-col">
+                <div className="px-4 py-3 border-b border-white/5 bg-white/5 flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-widest font-mono text-white">Live Telemetry Feed</span>
                 </div>
-              )}
-
-              {explanation.context.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1">Context</p>
-                  <ul className="list-disc list-inside space-y-0.5 text-xs">
-                    {explanation.context.map((c, i) => <li key={i}>{c}</li>)}
-                  </ul>
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+                  {loading && <div className="p-4 text-center text-xs font-mono text-muted-foreground">Loading telemetry...</div>}
+                  {!loading && telemetry.length === 0 && <div className="p-4 text-center text-xs font-mono text-muted-foreground">No active targets in sector.</div>}
+                  {telemetry.map(t => (
+                    <div key={t.id} className="grid grid-cols-[80px_1fr_1fr_100px] gap-4 px-3 py-2 text-xs font-mono items-center hover:bg-white/5 rounded border border-transparent cursor-default transition-colors">
+                      <span className="text-white">{t.flightNumber}</span>
+                      <span className="text-muted-foreground">FL{Math.round((t.altitude ?? 0) / 100)}</span>
+                      <span className="text-muted-foreground">{t.speed ?? 0} KT</span>
+                      <span className="text-right text-primary">TRK-ON</span>
+                    </div>
+                  ))}
                 </div>
-              )}
-
-              {explanation.limitations.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1">Limitations</p>
-                  <ul className="list-disc list-inside space-y-0.5 text-xs text-muted-foreground">
-                    {explanation.limitations.map((l, i) => <li key={i}>{l}</li>)}
-                  </ul>
-                </div>
-              )}
+              </div>
             </div>
-          )}
+
+            {/* Sidebar / Anomalies */}
+            <div className="flex flex-col gap-6">
+              <div className={`glass-panel rounded flex-1 flex flex-col overflow-hidden ${anomalies.length > 0 ? 'border-destructive/30' : 'border-primary/20'}`}>
+                <div className={`px-4 py-3 border-b flex items-center justify-between ${anomalies.length > 0 ? 'border-destructive/20 bg-destructive/10' : 'border-primary/20 bg-primary/10'}`}>
+                  <div className="flex items-center gap-2">
+                    {anomalies.length > 0 ? <ShieldAlert className="size-3 text-destructive" /> : <CheckCircle2 className="size-3 text-primary" />}
+                    <span className={`text-[10px] uppercase tracking-widest font-mono font-bold ${anomalies.length > 0 ? 'text-destructive' : 'text-primary'}`}>Anomalies</span>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold">{anomalies.length} OPEN</span>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3">
+                  {loading && <div className="text-center text-xs font-mono text-muted-foreground py-4">Scanning...</div>}
+                  {!loading && anomalies.length === 0 && (
+                    <div className="flex flex-col items-center justify-center text-center opacity-50 py-12 space-y-2">
+                      <AlertTriangle className="size-8 text-primary mb-2" />
+                      <p className="font-mono text-xs uppercase tracking-widest text-primary">System Nominal</p>
+                      <p className="text-[10px] text-muted-foreground">All operational telemetry within expected boundaries.</p>
+                    </div>
+                  )}
+                  {anomalies.map(a => (
+                    <div key={a.id} className="glass-panel p-3 rounded border border-destructive/20 space-y-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-mono text-sm text-destructive">{a.flightNumber}</p>
+                          <p className="text-[10px] uppercase font-bold tracking-widest text-destructive/70">{a.anomalyType}</p>
+                        </div>
+                        <div className="px-1.5 py-0.5 rounded bg-destructive/20 text-[9px] font-mono font-bold text-destructive">
+                          {a.severity}
+                        </div>
+                      </div>
+                      
+                      <p className="text-[11px] text-muted-foreground">{a.description}</p>
+                      
+                      <div className="flex items-center gap-2 pt-2 border-t border-white/5">
+                        <Button size="sm" variant="outline" className="flex-1 h-7 text-[10px] uppercase tracking-widest gap-1 border-white/10 hover:bg-white/10" onClick={() => handleStatusUpdate(a.id, "RESOLVED")}>
+                          Resolve
+                        </Button>
+                        <Button size="sm" variant="secondary" className="flex-1 h-7 text-[10px] uppercase tracking-widest gap-1 bg-primary/20 text-primary hover:bg-primary/30" onClick={() => handleExplain(a.id)}>
+                          <Sparkles className="size-3" /> AI Analysis
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      {/* AI Explanation Modal */}
+      <Dialog open={showExplanation} onOpenChange={setShowExplanation}>
+        <DialogContent className="glass-panel-heavy border border-white/10 max-w-xl p-0 overflow-hidden bg-background">
+          <div className="px-6 py-4 border-b border-white/10 flex items-center gap-3 bg-primary/5">
+            <Bot className="size-5 text-primary" />
+            <DialogTitle className="text-sm font-semibold tracking-wide text-white uppercase">Intelligence Analysis</DialogTitle>
+          </div>
+          
+          <div className="p-6 max-h-[70vh] overflow-y-auto custom-scrollbar space-y-6">
+            {explainingId && (
+              <div className="flex flex-col items-center justify-center py-12 space-y-4 opacity-50">
+                <Loader2 className="size-8 animate-spin text-primary" />
+                <p className="text-[10px] font-mono tracking-widest uppercase text-primary">Synthesizing telemetry data...</p>
+              </div>
+            )}
+            
+            {explanation && !explainingId && (
+              <div className="space-y-6">
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-2">Executive Summary</p>
+                  <p className="text-sm text-white/90 leading-relaxed bg-white/5 p-4 rounded-lg border border-white/5">{explanation.explanation}</p>
+                </div>
+                
+                {explanation.facts.length > 0 && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-2 flex items-center gap-2"><div className="size-1.5 rounded-full bg-primary"/> Measured Facts</p>
+                    <ul className="space-y-2">
+                      {explanation.facts.map((f, i) => <li key={i} className="text-xs text-muted-foreground glass-panel px-3 py-2 rounded font-mono">{f}</li>)}
+                    </ul>
+                  </div>
+                )}
+                
+                {explanation.context.length > 0 && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-2 flex items-center gap-2"><div className="size-1.5 rounded-full bg-amber-500"/> Contextual Variables</p>
+                    <ul className="space-y-2">
+                      {explanation.context.map((c, i) => <li key={i} className="text-xs text-muted-foreground glass-panel px-3 py-2 rounded">{c}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
   );
 }
-
-

@@ -1,220 +1,150 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { airportService, type AirportFlightsResponse } from "@/services/airport.service";
-import { weatherService } from "@/services/weather.service";
-import { ApiError } from "@/services/api";
-import type { AirportDto, FlightDto, WeatherDto } from "@/types/api";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
+import { airportService } from "@/services/airport.service";
+import { flightService } from "@/services/flight.service";
+import type { AirportDto, FlightDto } from "@/types/api";
 import { TrackingMap } from "@/components/tracking/TrackingMap";
-import { Building2, MapPin, Thermometer, Wind, Droplets, AlertCircle, Plane, Clock, Navigation } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Loader2, ArrowLeft, PlaneTakeoff, PlaneLanding, Globe } from "lucide-react";
 
 export function AirportDetailPage() {
   const { iata } = useParams<{ iata: string }>();
-  const code = (iata ?? "").toUpperCase();
-
   const [airport, setAirport] = useState<AirportDto | null>(null);
-  const [loadingAirport, setLoadingAirport] = useState(true);
-  const [airportError, setAirportError] = useState<string | null>(null);
-
-  const [departures, setDepartures] = useState<AirportFlightsResponse | null>(null);
-  const [arrivals, setArrivals] = useState<AirportFlightsResponse | null>(null);
-  const [loadingFlights, setLoadingFlights] = useState(false);
-  const [flightsError, setFlightsError] = useState<string | null>(null);
-
-  const [weather, setWeather] = useState<WeatherDto | null>(null);
-  const [loadingWeather, setLoadingWeather] = useState(false);
-  const [weatherError, setWeatherError] = useState<string | null>(null);
+  const [departures, setDepartures] = useState<FlightDto[]>([]);
+  const [arrivals, setArrivals] = useState<FlightDto[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!code || !/^[A-Z]{3}$/.test(code)) {
-      setAirportError("Invalid IATA code.");
-      setLoadingAirport(false);
-      return;
+    if (!iata) return;
+    loadData(iata);
+  }, [iata]);
+
+  const loadData = async (code: string) => {
+    setLoading(true);
+    try {
+      const apt = await airportService.getByIata(code);
+      setAirport(apt);
+      
+      const [dep, arr] = await Promise.all([
+        flightService.search({ dep_iata: code, limit: 15 }),
+        flightService.search({ arr_iata: code, limit: 15 })
+      ]);
+      setDepartures(dep.flights);
+      setArrivals(arr.flights);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
     }
-    setLoadingAirport(true);
-    setAirportError(null);
-    airportService
-      .getByIata(code)
-      .then(setAirport)
-      .catch((e) => {
-        if (e instanceof ApiError) setAirportError(e.message);
-        else setAirportError("Failed to load airport.");
-      })
-      .finally(() => setLoadingAirport(false));
+  };
 
-    setLoadingFlights(true);
-    setFlightsError(null);
-    Promise.all([airportService.getDepartures(code, 10).catch((e) => e), airportService.getArrivals(code, 10).catch((e) => e)]).then(([dep, arr]) => {
-      if (dep instanceof Error) {
-        // Check if ApiError
-        if (dep instanceof ApiError) setFlightsError(dep.message);
-      } else {
-        setDepartures(dep as AirportFlightsResponse);
-      }
-      if (arr instanceof Error) {
-        if (arr instanceof ApiError) setFlightsError((prev) => prev ? `${prev} • ${arr.message}` : arr.message);
-      } else {
-        setArrivals(arr as AirportFlightsResponse);
-      }
-    }).finally(() => setLoadingFlights(false));
+  if (loading) {
+    return <div className="min-h-[100dvh] flex items-center justify-center bg-background"><Loader2 className="size-8 animate-spin text-primary" /></div>;
+  }
 
-    setLoadingWeather(true);
-    setWeatherError(null);
-    weatherService
-      .getByAirport(code)
-      .then(setWeather)
-      .catch((e) => {
-        if (e instanceof ApiError) setWeatherError(e.message);
-        else setWeatherError("Weather unavailable.");
-      })
-      .finally(() => setLoadingWeather(false));
-  }, [code]);
-
-  if (!code || !/^[A-Z]{3}$/.test(code)) {
+  if (!airport) {
     return (
-      <Alert variant="destructive"><AlertCircle className="size-4" /><AlertTitle>Invalid IATA</AlertTitle><AlertDescription>Use a 3-letter code like DEL.</AlertDescription></Alert>
+      <div className="min-h-[100dvh] flex flex-col items-center justify-center bg-background space-y-4">
+        <h1 className="text-2xl font-mono text-white">404 - Airport Not Found</h1>
+        <Link to="/airports" className="text-primary uppercase text-xs tracking-wider font-semibold">Return to Directory</Link>
+      </div>
     );
   }
 
+  const mapPoint = airport.latitude && airport.longitude 
+    ? { lat: airport.latitude, lng: airport.longitude, label: airport.iata, subLabel: airport.name } 
+    : null;
+
   return (
-    <div className="space-y-6">
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem><BreadcrumbLink render={<Link to="/airports" />}>Airports</BreadcrumbLink></BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem><BreadcrumbPage className="font-mono">{code}</BreadcrumbPage></BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
+    <div className="w-full flex-1 flex flex-col lg:flex-row h-[100dvh] pt-20 overflow-hidden bg-background">
+      {/* Left Details 60% */}
+      <div className="w-full lg:w-[60%] flex flex-col h-full border-r border-white/5 relative z-10 shadow-2xl">
+        <div className="p-6 border-b border-white/5 shrink-0 flex items-center justify-between">
+          <Link to="/airports" className="text-[10px] uppercase tracking-wider flex items-center gap-2 text-muted-foreground hover:text-primary transition-colors">
+            <ArrowLeft className="size-3" /> Back to Directory
+          </Link>
+          <div className="text-[10px] uppercase tracking-widest font-mono text-white/50">{airport.icao ?? "NO-ICAO"}</div>
+        </div>
 
-      {/* Airport header */}
-      <Card>
-        <CardHeader>
-          {loadingAirport ? (
-            <Skeleton className="h-6 w-40" />
-          ) : airportError ? (
-            <Alert variant="destructive"><AlertCircle className="size-4" /><AlertTitle>Airport error</AlertTitle><AlertDescription className="text-xs">{airportError}</AlertDescription></Alert>
-          ) : airport ? (
-            <>
-              <CardTitle className="flex items-center gap-2 text-xl"><Building2 className="size-5 text-primary" /> {airport.name} <Badge variant="secondary" className="font-mono">{airport.iata}</Badge> {airport.icao && <Badge variant="outline" className="font-mono text-[10px]">{airport.icao}</Badge>}</CardTitle>
-              <CardDescription className="flex flex-wrap gap-2 text-xs">
-                <span className="flex items-center gap-1"><MapPin className="size-3" />{airport.city ?? "—"}{airport.country ? `, ${airport.country}` : ""} {airport.countryIso2 ? `(${airport.countryIso2})` : ""}</span>
-                <span>• {airport.timezone ?? "—"}</span>
-                <span>• {airport.latitude != null && airport.longitude != null ? `${airport.latitude.toFixed(3)}, ${airport.longitude.toFixed(3)}` : "no coordinates"}</span>
-              </CardDescription>
-            </>
-          ) : null}
-        </CardHeader>
-        {airport && !loadingAirport && (
-          <CardContent className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between"><span className="text-muted-foreground">IATA</span><span className="font-mono font-medium">{airport.iata}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">ICAO</span><span className="font-mono">{airport.icao ?? "—"}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">City</span><span>{airport.city ?? "—"}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Country</span><span>{airport.country ?? "—"}</span></div>
-            </div>
-            <div>
-              {airport.latitude != null && airport.longitude != null ? (
-                <TrackingMap
-                  departure={{ lat: airport.latitude, lng: airport.longitude, label: airport.name, subLabel: `${airport.iata} • ${airport.city ?? ""}` }}
-                  className="min-h-[180px]"
-                />
-              ) : (
-                <div className="rounded-xl border bg-muted/20 flex items-center justify-center min-h-[180px] text-xs text-muted-foreground">No coordinates for map.</div>
-              )}
-            </div>
-          </CardContent>
-        )}
-      </Card>
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8">
+          {/* Identity */}
+          <div className="space-y-2">
+            <p className="text-label text-primary flex items-center gap-2"><Globe className="size-3" /> {airport.country}</p>
+            <h1 className="text-6xl font-mono font-semibold tracking-tighter text-white uppercase">{airport.iata}</h1>
+            <p className="text-xl text-muted-foreground">{airport.name}</p>
+          </div>
 
-      {/* Weather */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2"><Thermometer className="size-4" /> Current weather <span className="text-xs font-normal text-muted-foreground">via <code className="bg-muted px-1 rounded">GET /api/weather/airport/{"{iata}"}</code></span></CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loadingWeather && <Skeleton className="h-16 w-full" />}
-          {weatherError && <Alert variant="destructive"><AlertCircle className="size-4" /><AlertTitle>Weather error</AlertTitle><AlertDescription className="text-xs">{weatherError}</AlertDescription></Alert>}
-          {!loadingWeather && weather && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-              <div className="rounded-lg border bg-muted/20 p-3 space-y-1"><div className="text-muted-foreground flex items-center gap-1"><Thermometer className="size-3" /> Temperature</div><div className="text-lg font-semibold">{weather.temperature}°C</div><div className="text-muted-foreground">{weather.weatherCondition ?? "—"} {weather.weatherCode != null ? `(${weather.weatherCode})` : ""}</div></div>
-              <div className="rounded-lg border p-3 space-y-1"><div className="text-muted-foreground flex items-center gap-1"><Wind className="size-3" /> Wind</div><div className="text-lg font-semibold">{weather.windSpeed ?? "—"} km/h</div><div className="text-muted-foreground">Precip {weather.precipitation ?? "—"} mm</div></div>
-              <div className="rounded-lg border p-3 space-y-1"><div className="text-muted-foreground flex items-center gap-1"><Droplets className="size-3" /> Humidity</div><div className="text-lg font-semibold">{weather.humidity ?? "—"}%</div><div className="text-muted-foreground">Feels {weather.apparentTemperature ?? "—"}°C</div></div>
-              <div className="rounded-lg border p-3 space-y-1"><div className="text-muted-foreground">Timezone</div><div className="text-sm font-medium">{weather.timezone ?? "—"}</div><div className="text-muted-foreground">{weather.observationTime ? new Date(weather.observationTime).toLocaleString() : ""}</div></div>
-            </div>
-          )}
-          {!loadingWeather && !weather && !weatherError && <p className="text-xs text-muted-foreground">No weather data.</p>}
-        </CardContent>
-      </Card>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pb-8 border-b border-white/5">
+            <DataBlock label="Timezone" value={airport.timezone} />
+            <DataBlock label="Lat" value={airport.latitude} />
+            <DataBlock label="Lng" value={airport.longitude} />
+            <DataBlock label="City" value={airport.city} />
+          </div>
 
-      {/* Flights */}
-      <Tabs defaultValue="departures">
-        <TabsList>
-          <TabsTrigger value="departures" className="gap-1.5"><Navigation className="size-3.5" /> Departures {departures ? `(${departures.count})` : ""}</TabsTrigger>
-          <TabsTrigger value="arrivals" className="gap-1.5"><Plane className="size-3.5" /> Arrivals {arrivals ? `(${arrivals.count})` : ""}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="departures" className="mt-4">
-          <Card>
-            <CardHeader className="pb-2"><CardDescription className="text-xs">Via <code className="bg-muted px-1 rounded">GET /api/airports/{"{iata}"}/departures?limit=10</code></CardDescription></CardHeader>
-            <CardContent>
-              {loadingFlights && <Skeleton className="h-32 w-full" />}
-              {flightsError && <Alert variant="destructive"><AlertCircle className="size-4" /><AlertTitle>Flights error</AlertTitle><AlertDescription className="text-xs">{flightsError}</AlertDescription></Alert>}
-              {!loadingFlights && departures && departures.flights.length === 0 && <p className="text-xs text-muted-foreground">No departures found.</p>}
-              {departures && departures.flights.length > 0 && <FlightsTable flights={departures.flights} />}
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="arrivals" className="mt-4">
-          <Card>
-            <CardHeader className="pb-2"><CardDescription className="text-xs">Via <code className="bg-muted px-1 rounded">GET /api/airports/{"{iata}"}/arrivals?limit=10</code></CardDescription></CardHeader>
-            <CardContent>
-              {loadingFlights && <Skeleton className="h-32 w-full" />}
-              {!loadingFlights && arrivals && arrivals.flights.length === 0 && <p className="text-xs text-muted-foreground">No arrivals found.</p>}
-              {arrivals && arrivals.flights.length > 0 && <FlightsTable flights={arrivals.flights} />}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          {/* Boards */}
+          <Tabs defaultValue="departures" className="w-full">
+            <TabsList className="w-full bg-background border border-white/5 h-12 p-1 rounded-lg">
+              <TabsTrigger value="departures" className="flex-1 text-xs uppercase tracking-wider data-[state=active]:bg-primary/20 data-[state=active]:text-primary rounded">
+                <PlaneTakeoff className="size-3.5 mr-2" /> Departures
+              </TabsTrigger>
+              <TabsTrigger value="arrivals" className="flex-1 text-xs uppercase tracking-wider data-[state=active]:bg-primary/20 data-[state=active]:text-primary rounded">
+                <PlaneLanding className="size-3.5 mr-2" /> Arrivals
+              </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="departures" className="pt-6 outline-none">
+              <FlightBoard flights={departures} isDeparture={true} />
+            </TabsContent>
+            <TabsContent value="arrivals" className="pt-6 outline-none">
+              <FlightBoard flights={arrivals} isDeparture={false} />
+            </TabsContent>
+          </Tabs>
+        </div>
+      </div>
 
-      <div className="flex justify-center"><Link to="/airports" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>Back to search</Link></div>
+      {/* Right Map 40% */}
+      <div className="w-full lg:w-[40%] h-[40dvh] lg:h-full relative bg-black shrink-0">
+        <TrackingMap departure={mapPoint} />
+        <div className="absolute inset-0 pointer-events-none shadow-[inset_1px_0_20px_rgba(0,0,0,0.5)] z-10" />
+      </div>
     </div>
   );
 }
 
-function FlightsTable({ flights }: { flights: FlightDto[] }) {
+function DataBlock({ label, value }: { label: string, value: any }) {
   return (
-    <div className="rounded-md border overflow-hidden">
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="text-xs">Flight</TableHead>
-              <TableHead className="text-xs">Airline</TableHead>
-              <TableHead className="text-xs">Destination/Origin</TableHead>
-              <TableHead className="text-xs">Scheduled</TableHead>
-              <TableHead className="text-xs">Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {flights.map((f) => (
-              <TableRow key={f.flightNumber ?? f.flightIata ?? Math.random().toString()}>
-                <TableCell className="font-mono text-xs">{f.flightIata ?? f.flightNumber ?? "—"}</TableCell>
-                <TableCell className="text-xs">{f.airlineName ?? f.airlineIata ?? "—"}</TableCell>
-                <TableCell className="text-xs">{f.arrivalIata ?? f.departureIata ?? "—"} <span className="text-muted-foreground">{f.arrivalAirport ?? f.departureAirport ?? ""}</span></TableCell>
-                <TableCell className="text-xs"><span className="flex items-center gap-1"><Clock className="size-3" />{f.departureScheduled ?? f.arrivalScheduled ?? "—"}</span></TableCell>
-                <TableCell><Badge variant="outline" className="text-[10px]">{f.status ?? "—"}</Badge></TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+    <div className="space-y-1">
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="font-mono text-sm text-white truncate">{value ?? "—"}</p>
+    </div>
+  );
+}
+
+function FlightBoard({ flights, isDeparture }: { flights: FlightDto[], isDeparture: boolean }) {
+  if (flights.length === 0) return <div className="text-center py-12 text-sm text-muted-foreground font-mono">No recent operations.</div>;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-4 md:grid-cols-5 gap-4 px-4 py-2 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-white/5">
+        <div>Flight</div>
+        <div className="hidden md:block">Airline</div>
+        <div>{isDeparture ? 'To' : 'From'}</div>
+        <div>Scheduled</div>
+        <div className="text-right">Status</div>
       </div>
+      {flights.map(f => (
+        <Link key={f.flightNumber ?? Math.random()} to={`/tracking?flight_iata=${f.flightIata ?? f.flightNumber}`} className="grid grid-cols-4 md:grid-cols-5 gap-4 px-4 py-3 text-sm items-center hover:bg-white/5 rounded-lg transition-colors border border-transparent hover:border-white/5 cursor-pointer">
+          <div className="font-mono font-semibold text-white">{f.flightIata ?? f.flightNumber}</div>
+          <div className="hidden md:block text-muted-foreground truncate">{f.airlineName ?? "—"}</div>
+          <div className="font-mono text-white/80">{isDeparture ? (f.arrivalIata ?? "—") : (f.departureIata ?? "—")}</div>
+          <div className="font-mono text-muted-foreground">{isDeparture ? f.departureScheduled : f.arrivalScheduled}</div>
+          <div className="text-right">
+            <span className={`px-2 py-0.5 rounded text-[10px] uppercase tracking-widest font-mono ${f.status === 'active' ? 'text-primary' : 'text-muted-foreground'}`}>
+              {f.status ?? "Scheduled"}
+            </span>
+          </div>
+        </Link>
+      ))}
     </div>
   );
 }
