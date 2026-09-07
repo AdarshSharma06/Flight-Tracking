@@ -4,12 +4,15 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Plane } from "lucide-react";
 
-const planeIcon = L.divIcon({
-  html: '<div style="background:#38bdf8;color:#0f172a;border-radius:9999px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 15px rgba(56,189,248,0.5);transform:rotate(45deg);">✈</div>',
-  className: "",
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-});
+function makePlaneIcon(heading?: number | null) {
+  const rot = heading != null && !isNaN(heading) ? heading : 45;
+  return L.divIcon({
+    html: `<div style="background:#38bdf8;color:#0f172a;border-radius:9999px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 16px rgba(56,189,248,0.55);transform:rotate(${rot}deg);font-size:14px;line-height:1;">✈</div>`,
+    className: "",
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+  });
+}
 
 const dotIcon = L.divIcon({
   html: '<div style="background:white;border:3px solid #38bdf8;border-radius:9999px;width:16px;height:16px;"></div>',
@@ -31,23 +34,45 @@ interface TrackingMapProps {
   arrival?: MapPoint | null;
   altitude?: number | null;
   speed?: number | null;
+  heading?: number | null;
   className?: string;
+}
+
+function InvalidateSize() {
+  const map = useMap();
+  useEffect(() => {
+    // Fix Leaflet 0-height on flex/container resize
+    const t1 = setTimeout(() => map.invalidateSize(), 100);
+    const t2 = setTimeout(() => map.invalidateSize(), 400);
+    const t3 = setTimeout(() => map.invalidateSize(), 900);
+    const onResize = () => map.invalidateSize();
+    window.addEventListener("resize", onResize);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [map]);
+  return null;
 }
 
 function FitBounds({ points }: { points: [number, number][] }) {
   const map = useMap();
   useEffect(() => {
     if (points.length === 0) return;
+    // Ensure map has size before fitting
+    setTimeout(() => map.invalidateSize(), 50);
     if (points.length === 1) {
-      map.setView(points[0], 8);
+      map.setView(points[0], 8, { animate: true });
     } else {
-      map.fitBounds(points, { padding: [60, 60] });
+      map.fitBounds(points, { padding: [60, 60], animate: true });
     }
   }, [map, points]);
   return null;
 }
 
-export function TrackingMap({ live, departure, arrival, altitude, speed, className }: TrackingMapProps) {
+export function TrackingMap({ live, departure, arrival, altitude, speed, heading, className }: TrackingMapProps) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -72,8 +97,8 @@ export function TrackingMap({ live, departure, arrival, altitude, speed, classNa
   if (arrival) line.push([arrival.lat, arrival.lng]);
 
   return (
-    <div className={`w-full h-full relative bg-black ${className ?? ""}`}>
-      <MapContainer center={center} zoom={4} scrollWheelZoom={false} className="h-full w-full bg-black z-0" zoomControl={false}>
+    <div className={`w-full h-full relative bg-black ${className ?? ""}`} style={{ minHeight: 320 }}>
+      <MapContainer center={center} zoom={4} scrollWheelZoom={true} className="h-full w-full bg-black z-0" zoomControl={true} style={{ height: "100%", width: "100%" }}>
         <TileLayer 
           attribution='&copy; <a href="https://carto.com/">Carto</a>' 
           url="https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png" 
@@ -99,7 +124,7 @@ export function TrackingMap({ live, departure, arrival, altitude, speed, classNa
           </Marker>
         )}
         {live && (
-          <Marker position={[live.lat, live.lng]} icon={planeIcon}>
+          <Marker position={[live.lat, live.lng]} icon={makePlaneIcon(heading)}>
             <Popup className="custom-popup">
               <div className="font-mono text-xs space-y-1">
                 <strong className="block text-primary uppercase flex items-center gap-1">
@@ -113,6 +138,7 @@ export function TrackingMap({ live, departure, arrival, altitude, speed, classNa
         )}
         {line.length >= 2 && <Polyline positions={line} color="#38bdf8" weight={2} opacity={0.6} dashArray={live ? undefined : "4 8"} />}
         <FitBounds points={points} />
+        <InvalidateSize />
       </MapContainer>
       
       {/* Map Overlay Vignette */}
