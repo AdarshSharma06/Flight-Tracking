@@ -647,7 +647,7 @@ export function TrackingPage() {
                       <DataBlock label="Vertical" value={tracking.speedVertical != null ? `${tracking.speedVertical}` : null} unit="m/s" />
                     </div>
                     <div className="h-px bg-white/5" />
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-0 text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 sm:gap-x-10 gap-y-0 text-xs">
                       <LiveRow label="Flight date" value={tracking.flightDate ? formatFlightDate(tracking.flightDate) : "—"} />
                       <LiveRow label="Status" value={tracking.status ? formatStatus(tracking.status) : "—"} />
                       <LiveRow label="Route" value={tracking.route ?? "—"} mono />

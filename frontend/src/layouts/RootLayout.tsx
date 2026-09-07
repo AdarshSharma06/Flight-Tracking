@@ -46,17 +46,17 @@ export function RootLayout() {
         "fixed top-0 z-50 w-full transition-all duration-300",
         isCinematicPage ? "bg-gradient-to-b from-background/90 to-transparent border-b-0" : "bg-background/70 backdrop-blur-md border-b border-white/5"
       )}>
-        <div className="w-full px-6 lg:px-12 h-20 flex items-center justify-between gap-6">
-          {/* Brand */}
-          <Link to="/" className="flex items-center gap-3 font-semibold tracking-tight shrink-0 group">
+        <div className="w-full px-6 lg:px-12 h-20 grid grid-cols-2 lg:grid-cols-3 items-center gap-6">
+          {/* Brand – LEFT */}
+          <Link to="/" className="flex items-center gap-3 font-semibold tracking-tight shrink-0 group justify-self-start">
             <span className="inline-flex size-8 items-center justify-center rounded bg-primary text-primary-foreground group-hover:bg-primary/90 transition-colors">
               <Plane className="size-4" />
             </span>
             <span className="text-lg tracking-wide uppercase font-mono">Flight Tracking</span>
           </Link>
 
-          {/* Desktop nav */}
-          <nav className="hidden lg:flex items-center gap-6">
+          {/* Desktop nav – CENTER */}
+          <nav className="hidden lg:flex items-center justify-center gap-6 lg:gap-7 xl:gap-8 justify-self-center">
             {navItems.map((item) => (
               <NavLink
                 key={item.to}
@@ -73,8 +73,8 @@ export function RootLayout() {
             ))}
           </nav>
 
-          {/* Desktop auth actions */}
-          <div className="hidden lg:flex items-center gap-4">
+          {/* Desktop auth actions – RIGHT */}
+          <div className="hidden lg:flex items-center justify-end gap-4 justify-self-end">
             {!isAuthenticated ? (
               <>
                 <Link to="/login" className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground hover:text-foreground transition-colors">
@@ -102,14 +102,15 @@ export function RootLayout() {
             )}
           </div>
 
-          {/* Mobile trigger */}
-          <Sheet open={open} onOpenChange={setOpen}>
-            <SheetTrigger>
-              <Button variant="ghost" size="icon" className="lg:hidden text-foreground hover:bg-white/10 rounded-full">
-                <Menu className="size-5" />
-                <span className="sr-only">Open menu</span>
-              </Button>
-            </SheetTrigger>
+          {/* Mobile trigger – right aligned */}
+          <div className="justify-self-end lg:hidden flex justify-end">
+            <Sheet open={open} onOpenChange={setOpen}>
+              <SheetTrigger>
+                <Button variant="ghost" size="icon" className="text-foreground hover:bg-white/10 rounded-full">
+                  <Menu className="size-5" />
+                  <span className="sr-only">Open menu</span>
+                </Button>
+              </SheetTrigger>
             <SheetContent side="right" className="w-full sm:w-[360px] glass-panel-heavy border-l border-white/10 p-0">
               <SheetHeader className="text-left p-6 border-b border-white/5">
                 <SheetTitle className="flex items-center gap-3 font-mono uppercase tracking-widest text-sm">
@@ -144,6 +145,7 @@ export function RootLayout() {
               </div>
             </SheetContent>
           </Sheet>
+          </div>
         </div>
       </header>
 
