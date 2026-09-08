@@ -278,14 +278,18 @@ export function BookingPage() {
     setHistoryError(null);
     try {
       const res: PageResponse<BookingResponse> = await bookingService.listMyBookingsPaginated(p, size);
-      setMyBookings(res.content);
-      setPageInfo({ page: res.page, size: res.size, totalPages: res.totalPages, totalElements: res.totalElements });
-      setPage(res.page);
+      // Cap to 10 most recent — page size is already 10, slice and cap totals
+      const cappedContent = res.content.slice(0, 10);
+      const cappedTotal = Math.min(res.totalElements, 10);
+      setMyBookings(cappedContent);
+      setPageInfo({ page: 0, size: cappedContent.length || size, totalPages: cappedTotal > 0 ? 1 : 0, totalElements: cappedTotal });
+      setPage(0);
     } catch (e) {
       try {
         const list = await bookingService.listMyBookings();
-        setMyBookings(list);
-        setPageInfo(list.length ? { page: 0, size: list.length, totalPages: 1, totalElements: list.length } : null);
+        const sorted = [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 10);
+        setMyBookings(sorted);
+        setPageInfo(sorted.length ? { page: 0, size: sorted.length, totalPages: 1, totalElements: sorted.length } : null);
       } catch (err2) {
         if (e instanceof ApiError) setHistoryError(e.message);
         else if (err2 instanceof ApiError) setHistoryError(err2.message);
@@ -306,23 +310,31 @@ export function BookingPage() {
     }
   };
 
+  // Active Itineraries — only future flights (using current browser time, includes time)
+  const upcomingBookings = bookings.filter((b) => {
+    if (!b.departureScheduled) return false;
+    const dep = new Date(b.departureScheduled);
+    if (isNaN(dep.getTime())) return false;
+    return dep.getTime() > Date.now();
+  });
+
   return (
     <div className="w-full min-h-[100dvh] pt-20 pb-24 bg-background">
-      {/* Header — title only, search moved to two-column layout */}
+      {/* Header — title only, search in left column */}
       <div className="w-full bg-background border-b border-white/5 py-10 px-6 relative overflow-hidden">
         <div className="absolute inset-0 z-0 bg-gradient-to-tr from-background via-background/90 to-primary/10 flex items-center justify-center opacity-30">
           <Plane className="size-96 text-primary absolute -right-20 -top-20 opacity-20" />
         </div>
-        <div className="relative z-10 max-w-6xl mx-auto space-y-2">
+        <div className="relative z-10 w-[88%] max-w-[1600px] mx-auto space-y-2">
           <h1 className="text-3xl font-semibold tracking-tight text-white">Flight Search</h1>
           <p className="text-sm text-muted-foreground">Find and book your next operational route.</p>
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-8">
-        {/* Two-column desktop layout: Flight Search + Results | AI Recommendation */}
-        <div className="grid grid-cols-1 lg:grid-cols-[58%_42%] gap-6 items-start">
-          {/* LEFT 58% — Flight Search + Flight Results */}
+      <div className="w-[88%] max-w-[1600px] mx-auto px-6 pt-8 space-y-8">
+        {/* Two-column desktop layout: LEFT 60% independent vertical flow | RIGHT 40% AI */}
+        <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-6 items-start">
+          {/* LEFT 60% — Flight Search + Flight Results + Active Itineraries + My Bookings (independent from AI) */}
           <div className="space-y-6 min-w-0">
             {/* Flight Search — RESTORED to old fields, dark styling */}
             <div className="glass-panel-heavy rounded-xl p-4 shadow-xl space-y-4">
@@ -462,9 +474,176 @@ export function BookingPage() {
                 <p className="text-xs text-muted-foreground">Use search above.</p>
               )}
             </div>
+
+            {/* Active Itineraries — FUTURE ONLY (independent from AI) */}
+{/* Active Itineraries — PRESERVED */}
+          <div className="space-y-4">
+            <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
+              <Ticket className="size-4 text-primary" /> Active Itineraries
+            </h2>
+
+            {loading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="size-8 animate-spin text-primary" />
+              </div>
+            ) : upcomingBookings.length === 0 ? (
+              <div className="glass-panel rounded-xl p-12 text-center flex flex-col items-center justify-center space-y-4">
+                <Ticket className="size-12 text-white/10" />
+                <p className="font-mono text-sm text-muted-foreground">No upcoming flights</p>
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {upcomingBookings.map((booking) => (
+                  <div key={booking.id} className="glass-panel rounded-xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 hover:border-primary/30 transition-colors">
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <span className="px-2 py-0.5 rounded bg-primary/20 text-primary text-[10px] uppercase tracking-widest font-mono font-bold">
+                          {booking.status}
+                        </span>
+                        <span className="font-mono text-xs text-muted-foreground">REF: {booking.id}</span>
+                      </div>
+
+                      <div className="flex items-center gap-6">
+                        <div className="space-y-1">
+                          <p className="text-3xl font-mono text-white">{booking.origin ?? "—"}</p>
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {booking.departureScheduled ? format(new Date(booking.departureScheduled), "MMM dd, HH:mm") : "—"}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-center gap-1 opacity-50 px-4">
+                          <ArrowRight className="size-4" />
+                        </div>
+                        <div className="space-y-1 text-right">
+                          <p className="text-3xl font-mono text-white">{booking.destination ?? "—"}</p>
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {booking.arrivalScheduled ? format(new Date(booking.arrivalScheduled), "MMM dd, HH:mm") : "—"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-4 w-full md:w-auto border-t md:border-t-0 md:border-l border-white/5 pt-4 md:pt-0 md:pl-6">
+                      <div className="text-right">
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Airline</p>
+                        <p className="text-lg font-mono text-white">{booking.airlineName || "Unknown"}</p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-xs uppercase tracking-wider font-semibold border-white/10 bg-white/[0.03]"
+                        onClick={() => navigate(`/tracking?flight_iata=${booking.flightNumber}`)}
+                      >
+                        View Flight
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* RIGHT 42% — AI Flight Recommendation (logic unchanged, only repositioned) */}
+          {/* My bookings — PRESERVED */}
+          <div className="glass-panel rounded-xl p-6 space-y-4">
+            <div className="flex flex-row items-center justify-between gap-4">
+              <div className="space-y-1">
+                <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
+                  <Calendar className="size-4 text-primary" /> My bookings
+                </h2>
+                <p className="text-xs text-muted-foreground">Your booking history. Refresh to sync with server.</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => loadHistory(page)} disabled={loadingHistory} className="gap-1.5 border-white/10 bg-white/[0.03] text-xs">
+                <RefreshCw className={`size-4 ${loadingHistory ? "animate-spin" : ""}`} /> Refresh
+              </Button>
+            </div>
+
+            {loadingHistory && (
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-12 w-full rounded-lg bg-white/5 animate-pulse" />
+                ))}
+              </div>
+            )}
+
+            {historyError && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex gap-2">
+                <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+                <p className="text-xs text-destructive">{historyError}</p>
+              </div>
+            )}
+
+            {!loadingHistory && myBookings && myBookings.length === 0 && (
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-6 flex flex-col items-center gap-2 text-center">
+                <Ticket className="size-8 text-white/10" />
+                <p className="text-xs font-semibold text-white">No bookings yet</p>
+                <p className="text-xs text-muted-foreground">Search and book a flight to see it here.</p>
+              </div>
+            )}
+
+            {myBookings && myBookings.length > 0 && (
+              <>
+                <div className="rounded-xl border border-white/10 overflow-hidden bg-white/[0.02]">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-white/10 hover:bg-transparent">
+                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Flight</TableHead>
+                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Route</TableHead>
+                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Status</TableHead>
+                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Created</TableHead>
+                          <TableHead className="text-xs"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {myBookings.map((b) => (
+                          <TableRow key={b.id} className="border-white/5 hover:bg-white/[0.04]">
+                            <TableCell className="font-mono text-xs text-white">{b.flightNumber}</TableCell>
+                            <TableCell className="text-xs text-white">
+                              {b.origin} → {b.destination}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="secondary" className="text-[10px] bg-white/10 text-white border-white/10">
+                                {b.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{new Date(b.createdAt).toLocaleDateString()}</TableCell>
+                            <TableCell>
+                              <Button variant="ghost" size="sm" className="h-7 text-xs hover:bg-white/10" onClick={() => loadBookingDetail(b.id)}>
+                                View
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+
+                {pageInfo && pageInfo.totalPages > 1 && (
+                  <Pagination className="justify-center">
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious href="#" onClick={(e) => { e.preventDefault(); if (page > 0) loadHistory(page - 1); }} className={page === 0 ? "pointer-events-none opacity-50" : "hover:bg-white/10"} />
+                      </PaginationItem>
+                      {Array.from({ length: Math.min(pageInfo.totalPages, 5) }).map((_, i) => (
+                        <PaginationItem key={i}>
+                          <PaginationLink href="#" isActive={i === page} onClick={(e) => { e.preventDefault(); loadHistory(i); }} className="hover:bg-white/10 data-[active=true]:bg-primary data-[active=true]:text-primary-foreground">
+                            {i + 1}
+                          </PaginationLink>
+                        </PaginationItem>
+                      ))}
+                      <PaginationItem>
+                        <PaginationNext href="#" onClick={(e) => { e.preventDefault(); if (page < pageInfo.totalPages - 1) loadHistory(page + 1); }} className={page >= pageInfo.totalPages - 1 ? "pointer-events-none opacity-50" : "hover:bg-white/10"} />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                )}
+                {pageInfo && <p className="text-xs text-center text-muted-foreground">Page {pageInfo.page + 1} of {pageInfo.totalPages} • {pageInfo.totalElements} total</p>}
+              </>
+            )}
+          </div>
+          </div>
+
+          {/* RIGHT 40% — AI Flight Recommendation (logic unchanged, only repositioned) */}
           <div className="glass-panel rounded-xl p-6 space-y-4 border border-white/10 min-w-0 lg:sticky lg:top-24">
             <div className="space-y-1.5">
               <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
@@ -629,175 +808,6 @@ export function BookingPage() {
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* Full-width below two-column */}
-        <div className="space-y-8">
-          {/* Active Itineraries — PRESERVED */}
-          <div className="space-y-4">
-            <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
-              <Ticket className="size-4 text-primary" /> Active Itineraries
-            </h2>
-
-            {loading ? (
-              <div className="flex justify-center py-12">
-                <Loader2 className="size-8 animate-spin text-primary" />
-              </div>
-            ) : bookings.length === 0 ? (
-              <div className="glass-panel rounded-xl p-12 text-center flex flex-col items-center justify-center space-y-4">
-                <Ticket className="size-12 text-white/10" />
-                <p className="font-mono text-sm text-muted-foreground">No active itineraries.</p>
-              </div>
-            ) : (
-              <div className="grid gap-4">
-                {bookings.map((booking) => (
-                  <div key={booking.id} className="glass-panel rounded-xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 hover:border-primary/30 transition-colors">
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-3">
-                        <span className="px-2 py-0.5 rounded bg-primary/20 text-primary text-[10px] uppercase tracking-widest font-mono font-bold">
-                          {booking.status}
-                        </span>
-                        <span className="font-mono text-xs text-muted-foreground">REF: {booking.id}</span>
-                      </div>
-
-                      <div className="flex items-center gap-6">
-                        <div className="space-y-1">
-                          <p className="text-3xl font-mono text-white">{booking.origin ?? "—"}</p>
-                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                            {booking.departureScheduled ? format(new Date(booking.departureScheduled), "MMM dd, HH:mm") : "—"}
-                          </p>
-                        </div>
-                        <div className="flex flex-col items-center gap-1 opacity-50 px-4">
-                          <ArrowRight className="size-4" />
-                        </div>
-                        <div className="space-y-1 text-right">
-                          <p className="text-3xl font-mono text-white">{booking.destination ?? "—"}</p>
-                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                            {booking.arrivalScheduled ? format(new Date(booking.arrivalScheduled), "MMM dd, HH:mm") : "—"}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col items-end gap-4 w-full md:w-auto border-t md:border-t-0 md:border-l border-white/5 pt-4 md:pt-0 md:pl-6">
-                      <div className="text-right">
-                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Airline</p>
-                        <p className="text-lg font-mono text-white">{booking.airlineName || "Unknown"}</p>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-xs uppercase tracking-wider font-semibold border-white/10 bg-white/[0.03]"
-                        onClick={() => navigate(`/tracking?flight_iata=${booking.flightNumber}`)}
-                      >
-                        View Flight
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* My bookings — PRESERVED */}
-          <div className="glass-panel rounded-xl p-6 space-y-4">
-            <div className="flex flex-row items-center justify-between gap-4">
-              <div className="space-y-1">
-                <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
-                  <Calendar className="size-4 text-primary" /> My bookings
-                </h2>
-                <p className="text-xs text-muted-foreground">Your booking history. Refresh to sync with server.</p>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => loadHistory(page)} disabled={loadingHistory} className="gap-1.5 border-white/10 bg-white/[0.03] text-xs">
-                <RefreshCw className={`size-4 ${loadingHistory ? "animate-spin" : ""}`} /> Refresh
-              </Button>
-            </div>
-
-            {loadingHistory && (
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-12 w-full rounded-lg bg-white/5 animate-pulse" />
-                ))}
-              </div>
-            )}
-
-            {historyError && (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex gap-2">
-                <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
-                <p className="text-xs text-destructive">{historyError}</p>
-              </div>
-            )}
-
-            {!loadingHistory && myBookings && myBookings.length === 0 && (
-              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-6 flex flex-col items-center gap-2 text-center">
-                <Ticket className="size-8 text-white/10" />
-                <p className="text-xs font-semibold text-white">No bookings yet</p>
-                <p className="text-xs text-muted-foreground">Search and book a flight to see it here.</p>
-              </div>
-            )}
-
-            {myBookings && myBookings.length > 0 && (
-              <>
-                <div className="rounded-xl border border-white/10 overflow-hidden bg-white/[0.02]">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="border-white/10 hover:bg-transparent">
-                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Flight</TableHead>
-                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Route</TableHead>
-                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Status</TableHead>
-                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Created</TableHead>
-                          <TableHead className="text-xs"></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {myBookings.map((b) => (
-                          <TableRow key={b.id} className="border-white/5 hover:bg-white/[0.04]">
-                            <TableCell className="font-mono text-xs text-white">{b.flightNumber}</TableCell>
-                            <TableCell className="text-xs text-white">
-                              {b.origin} → {b.destination}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="secondary" className="text-[10px] bg-white/10 text-white border-white/10">
-                                {b.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">{new Date(b.createdAt).toLocaleDateString()}</TableCell>
-                            <TableCell>
-                              <Button variant="ghost" size="sm" className="h-7 text-xs hover:bg-white/10" onClick={() => loadBookingDetail(b.id)}>
-                                View
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-
-                {pageInfo && pageInfo.totalPages > 1 && (
-                  <Pagination className="justify-center">
-                    <PaginationContent>
-                      <PaginationItem>
-                        <PaginationPrevious href="#" onClick={(e) => { e.preventDefault(); if (page > 0) loadHistory(page - 1); }} className={page === 0 ? "pointer-events-none opacity-50" : "hover:bg-white/10"} />
-                      </PaginationItem>
-                      {Array.from({ length: Math.min(pageInfo.totalPages, 5) }).map((_, i) => (
-                        <PaginationItem key={i}>
-                          <PaginationLink href="#" isActive={i === page} onClick={(e) => { e.preventDefault(); loadHistory(i); }} className="hover:bg-white/10 data-[active=true]:bg-primary data-[active=true]:text-primary-foreground">
-                            {i + 1}
-                          </PaginationLink>
-                        </PaginationItem>
-                      ))}
-                      <PaginationItem>
-                        <PaginationNext href="#" onClick={(e) => { e.preventDefault(); if (page < pageInfo.totalPages - 1) loadHistory(page + 1); }} className={page >= pageInfo.totalPages - 1 ? "pointer-events-none opacity-50" : "hover:bg-white/10"} />
-                      </PaginationItem>
-                    </PaginationContent>
-                  </Pagination>
-                )}
-                {pageInfo && <p className="text-xs text-center text-muted-foreground">Page {pageInfo.page + 1} of {pageInfo.totalPages} • {pageInfo.totalElements} total</p>}
-              </>
             )}
           </div>
         </div>
