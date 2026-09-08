@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { bookingService } from "@/services/booking.service";
-import { flightService } from "@/services/flight.service";
+import { flightService, type FlightSearchParams } from "@/services/flight.service";
 import { aiService, type RecommendationResponse } from "@/services/ai.service";
 import { ApiError } from "@/services/api";
 import type { BookingResponse, FlightDto, PageResponse } from "@/types/api";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
@@ -18,7 +19,6 @@ import {
   Plane,
   Loader2,
   ArrowRight,
-  MapPin,
   AlertCircle,
   RefreshCw,
   Sparkles,
@@ -36,16 +36,19 @@ export function BookingPage() {
   const [bookings, setBookings] = useState<BookingResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Search state — preserved current redesigned search
-  const [origin, setOrigin] = useState("");
-  const [destination, setDestination] = useState("");
-  const [date, setDate] = useState("");
+  // Search state — restored to OLD frontend contract
+  const [flightIata, setFlightIata] = useState("");
+  const [depIata, setDepIata] = useState("");
+  const [arrIata, setArrIata] = useState("");
+  const [airlineIata, setAirlineIata] = useState("");
+  const [flightStatus, setFlightStatus] = useState("");
+  const [limit, setLimit] = useState("10");
 
   const [searchResults, setSearchResults] = useState<FlightDto[] | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
-  // AI recommendation — restored from old frontend
+  // AI recommendation — preserved (DO NOT CHANGE LOGIC)
   const [aiQuery, setAiQuery] = useState("");
   const [aiResult, setAiResult] = useState<RecommendationResponse | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -94,34 +97,40 @@ export function BookingPage() {
     }
   };
 
+  // Restored search handler — matches OLD frontend exactly
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
+    const params: FlightSearchParams = {};
+    if (flightIata.trim()) params.flight_iata = flightIata.trim();
+    if (depIata.trim()) params.dep_iata = depIata.trim().toUpperCase();
+    if (arrIata.trim()) params.arr_iata = arrIata.trim().toUpperCase();
+    if (airlineIata.trim()) params.airline_iata = airlineIata.trim().toUpperCase();
+    if (flightStatus && flightStatus !== "all") params.flight_status = flightStatus;
+    const l = parseInt(limit, 10);
+    if (!isNaN(l)) params.limit = l;
+
+    if (!params.flight_iata && !params.dep_iata && !params.arr_iata && !params.airline_iata && !params.flight_status) {
+      setSearchError("Enter at least one filter.");
+      return;
+    }
     setSearchError(null);
     setSearchLoading(true);
     setSearchResults(null);
-
     try {
-      const params: Record<string, string> = {};
-      if (origin) params.departure_iata = origin;
-      if (destination) params.arrival_iata = destination;
-      if (date) params.date = date;
-
-      // reuse existing flightService.search contract — origin/destination/date mapped as available
-      // if params empty flightService will handle, but we allow empty to show error via catch
-      const res = await flightService.search(params as unknown as Parameters<typeof flightService.search>[0]);
+      const res = await flightService.search(params);
       setSearchResults(res.flights);
       if (res.flights.length === 0) {
-        setSearchError("No flights found for this route/date.");
+        setSearchError("No flights found.");
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to search flights";
-      setSearchError(msg);
+      if (err instanceof ApiError) setSearchError(err.message);
+      else setSearchError("Search failed.");
     } finally {
       setSearchLoading(false);
     }
   };
 
-  // --- AI helpers (from old frontend) ---
+  // --- AI helpers (from old frontend) — DO NOT MODIFY LOGIC ---
   const recommendationToDto = (flight: NonNullable<RecommendationResponse["recommended_flight"]>["flight"]): FlightDto => ({
     flightNumber: flight.flight_number ?? null,
     flightIata: flight.flight_number ?? null,
@@ -205,13 +214,14 @@ export function BookingPage() {
 
   const fillAiQueryFromSearch = () => {
     const parts: string[] = [];
-    if (origin.trim() && destination.trim()) {
-      parts.push(`from ${origin.trim().toUpperCase()} to ${destination.trim().toUpperCase()}`);
-    } else if (origin.trim()) {
-      parts.push(`from ${origin.trim().toUpperCase()}`);
-    } else if (destination.trim()) {
-      parts.push(`to ${destination.trim().toUpperCase()}`);
+    if (depIata.trim() && arrIata.trim()) {
+      parts.push(`from ${depIata.trim().toUpperCase()} to ${arrIata.trim().toUpperCase()}`);
+    } else if (depIata.trim()) {
+      parts.push(`from ${depIata.trim().toUpperCase()}`);
+    } else if (arrIata.trim()) {
+      parts.push(`to ${arrIata.trim().toUpperCase()}`);
     }
+    if (flightStatus && flightStatus !== "all") parts.push(`prefer ${flightStatus}`);
     const base = parts.length ? `Find me a flight ${parts.join(" ")}` : "";
     const hint = aiQuery.trim() ? aiQuery : base || "I need a direct evening flight from Delhi to Mumbai";
     setAiQuery(hint);
@@ -298,307 +308,498 @@ export function BookingPage() {
 
   return (
     <div className="w-full min-h-[100dvh] pt-20 pb-24 bg-background">
-      {/* Search Header — PRESERVED */}
-      <div className="w-full bg-background border-b border-white/5 py-12 px-6 relative overflow-hidden">
+      {/* Header — title only, search moved to two-column layout */}
+      <div className="w-full bg-background border-b border-white/5 py-10 px-6 relative overflow-hidden">
         <div className="absolute inset-0 z-0 bg-gradient-to-tr from-background via-background/90 to-primary/10 flex items-center justify-center opacity-30">
           <Plane className="size-96 text-primary absolute -right-20 -top-20 opacity-20" />
         </div>
-
-        <div className="relative z-10 max-w-5xl mx-auto space-y-8">
-          <div className="space-y-2">
-            <h1 className="text-3xl font-semibold tracking-tight text-white">Flight Search</h1>
-            <p className="text-sm text-muted-foreground">Find and book your next operational route.</p>
-          </div>
-
-          <div className="glass-panel-heavy p-4 rounded-xl shadow-2xl">
-            <form onSubmit={handleSearch} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-4">
-              <div className="space-y-1">
-                <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-1">Origin</label>
-                <div className="relative">
-                  <Plane className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                  <Input
-                    value={origin}
-                    onChange={(e) => setOrigin(e.target.value.toUpperCase())}
-                    placeholder="IATA (e.g. LHR)"
-                    maxLength={3}
-                    className="pl-9 h-12 bg-white/5 border-white/10 font-mono text-sm uppercase"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-1">Destination</label>
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                  <Input
-                    value={destination}
-                    onChange={(e) => setDestination(e.target.value.toUpperCase())}
-                    placeholder="IATA (e.g. JFK)"
-                    maxLength={3}
-                    className="pl-9 h-12 bg-white/5 border-white/10 font-mono text-sm uppercase"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-1">Date</label>
-                <Input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="h-12 bg-white/5 border-white/10 font-mono text-sm uppercase [color-scheme:dark]"
-                />
-              </div>
-              <div className="flex items-end">
-                <Button type="submit" disabled={searchLoading} className="h-12 px-8 uppercase tracking-wider font-semibold text-xs w-full">
-                  {searchLoading ? <Loader2 className="size-4 animate-spin" /> : "Search"}
-                </Button>
-              </div>
-            </form>
-          </div>
-
-          {searchError && (
-            <div className="max-w-xl mx-auto rounded p-3 border border-destructive/30 bg-destructive/10 flex items-center gap-3">
-              <AlertCircle className="size-4 text-destructive shrink-0" />
-              <span className="text-xs text-destructive">{searchError}</span>
-            </div>
-          )}
-          {bookingError && (
-            <div className="max-w-xl mx-auto rounded p-3 border border-destructive/30 bg-destructive/10 flex items-center gap-3">
-              <AlertCircle className="size-4 text-destructive shrink-0" />
-              <span className="text-xs text-destructive">{bookingError}</span>
-            </div>
-          )}
+        <div className="relative z-10 max-w-6xl mx-auto space-y-2">
+          <h1 className="text-3xl font-semibold tracking-tight text-white">Flight Search</h1>
+          <p className="text-sm text-muted-foreground">Find and book your next operational route.</p>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-6 pt-10 space-y-8">
-        {/* AI Flight Recommendation — RESTORED */}
-        <div className="glass-panel rounded-xl p-6 space-y-4 border border-white/10">
-          <div className="space-y-1.5">
-            <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
-              <Sparkles className="size-4 text-primary" /> AI Flight Recommendation
-            </h2>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Tell us what you are looking for and get flight recommendations based on your preferences, flight data, and available weather
-              information.
-            </p>
-            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-              <Bot className="size-3 text-primary" /> Your saved flight preferences are considered automatically.
-            </p>
-          </div>
+      <div className="max-w-6xl mx-auto px-6 pt-8 space-y-8">
+        {/* Two-column desktop layout: Flight Search + Results | AI Recommendation */}
+        <div className="grid grid-cols-1 lg:grid-cols-[58%_42%] gap-6 items-start">
+          {/* LEFT 58% — Flight Search + Flight Results */}
+          <div className="space-y-6 min-w-0">
+            {/* Flight Search — RESTORED to old fields, dark styling */}
+            <div className="glass-panel-heavy rounded-xl p-4 shadow-xl space-y-4">
+              <div className="space-y-1">
+                <h2 className="text-xs uppercase tracking-widest font-semibold text-white flex items-center gap-2">
+                  <Search className="size-3.5 text-primary" /> Find flights to book
+                </h2>
+                <p className="text-[11px] text-muted-foreground">Same flight search as Tracking · Filter by IATA, airline, status.</p>
+              </div>
+              <form onSubmit={handleSearch} className="space-y-3">
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Flight IATA</Label>
+                    <Input placeholder="LH400" value={flightIata} onChange={(e) => setFlightIata(e.target.value)} className="h-9 bg-white/5 border-white/10 font-mono text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Departure IATA</Label>
+                    <Input placeholder="BOM" maxLength={3} value={depIata} onChange={(e) => setDepIata(e.target.value.toUpperCase())} className="h-9 bg-white/5 border-white/10 font-mono text-sm uppercase" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Arrival IATA</Label>
+                    <Input placeholder="GAU" maxLength={3} value={arrIata} onChange={(e) => setArrIata(e.target.value.toUpperCase())} className="h-9 bg-white/5 border-white/10 font-mono text-sm uppercase" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Airline IATA</Label>
+                    <Input placeholder="LH" value={airlineIata} onChange={(e) => setAirlineIata(e.target.value.toUpperCase())} className="h-9 bg-white/5 border-white/10 font-mono text-sm uppercase" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Status</Label>
+                    <Select value={flightStatus || "all"} onValueChange={(v) => setFlightStatus((v as string) || "")}>
+                      <SelectTrigger className="h-9 bg-white/5 border-white/10 font-mono text-sm">
+                        <SelectValue placeholder="Any" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Any</SelectItem>
+                        <SelectItem value="scheduled">Scheduled</SelectItem>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="landed">Landed</SelectItem>
+                        <SelectItem value="cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Limit</Label>
+                    <Select value={limit} onValueChange={(v) => setLimit((v as string) ?? "10")}>
+                      <SelectTrigger className="w-[90px] h-9 bg-white/5 border-white/10 font-mono text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="10">10</SelectItem>
+                        <SelectItem value="25">25</SelectItem>
+                        <SelectItem value="50">50</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button type="submit" disabled={searchLoading} className="gap-2 h-9 uppercase tracking-wider text-xs font-semibold">
+                    {searchLoading ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />} Search
+                  </Button>
+                </div>
+              </form>
+              {searchError && (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex gap-2">
+                  <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+                  <p className="text-xs text-destructive">{searchError}</p>
+                </div>
+              )}
+              {bookingError && (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex gap-2">
+                  <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+                  <p className="text-xs text-destructive">{bookingError}</p>
+                </div>
+              )}
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="ai-query" className="text-xs">What kind of flight are you looking for?</Label>
-            <textarea
-              id="ai-query"
-              placeholder="e.g. I need a direct evening flight from Delhi to Mumbai"
-              value={aiQuery}
-              onChange={(e) => setAiQuery(e.target.value)}
-              rows={3}
-              className="flex min-h-[72px] w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/30 outline-none disabled:opacity-50 resize-none text-white"
-            />
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Button onClick={doAiRecommend} disabled={aiLoading} className="gap-2 uppercase tracking-wider text-xs font-semibold">
-                {aiLoading ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-                {aiLoading ? "Getting recommendations…" : "Get AI Recommendations"}
-              </Button>
-              <Button variant="outline" size="sm" onClick={fillAiQueryFromSearch} disabled={aiLoading} className="text-xs border-white/10 bg-white/[0.03] hover:bg-white/10">
-                Use current search
-              </Button>
+            {/* Flight Results — RESTORED, stays with Search on left */}
+            <div className="glass-panel rounded-xl p-6 space-y-4">
+              <div className="space-y-1">
+                <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
+                  <Search className="size-4 text-primary" /> Flight results
+                </h2>
+                <p className="text-xs text-muted-foreground">{searchResults ? `${searchResults.length} flights` : "Search to see bookable flights."}</p>
+              </div>
+
+              {searchLoading && (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-20 w-full rounded-lg bg-white/5 animate-pulse" />
+                  ))}
+                </div>
+              )}
+
+              {searchResults && searchResults.length === 0 && !searchLoading && (
+                <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 flex gap-3">
+                  <AlertCircle className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-white">No flights found</p>
+                    <p className="text-xs text-muted-foreground">No matching flights.</p>
+                  </div>
+                </div>
+              )}
+
+              {searchResults && searchResults.length > 0 && (
+                <div className="space-y-2">
+                  {searchResults.map((f) => {
+                    const key = f.flightNumber ?? f.flightIata ?? Math.random().toString();
+                    return (
+                      <div key={key} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white/[0.06] transition-colors">
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-sm font-semibold text-white">{f.flightIata ?? f.flightNumber ?? "—"}</span>
+                            <Badge variant="outline" className="text-[10px] border-white/15 text-white">
+                              {f.status ?? "—"}
+                            </Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
+                            <Building2 className="size-3" />
+                            {f.airlineName ?? f.airlineIata ?? "—"} • <Plane className="size-3" />
+                            {f.aircraftRegistration ?? "—"}
+                          </div>
+                          <div className="text-xs text-white">
+                            {f.departureIata ?? "—"} → {f.arrivalIata ?? "—"}{" "}
+                            <span className="text-muted-foreground">{f.departureScheduled ? format(new Date(f.departureScheduled), "MMM dd, HH:mm") : ""}</span>
+                          </div>
+                        </div>
+                        <Button size="sm" onClick={() => openBooking(f)} className="gap-1.5 shrink-0 uppercase tracking-wider text-xs">
+                          <Ticket className="size-4" /> Book
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {!searchResults && !searchLoading && !searchError && (
+                <p className="text-xs text-muted-foreground">Use search above.</p>
+              )}
             </div>
           </div>
 
-          {aiError && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex items-start gap-2">
-              <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-destructive">Recommendation failed</p>
-                <p className="text-xs text-destructive/80">{aiError}</p>
+          {/* RIGHT 42% — AI Flight Recommendation (logic unchanged, only repositioned) */}
+          <div className="glass-panel rounded-xl p-6 space-y-4 border border-white/10 min-w-0 lg:sticky lg:top-24">
+            <div className="space-y-1.5">
+              <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
+                <Sparkles className="size-4 text-primary" /> AI Flight Recommendation
+              </h2>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Tell us what you are looking for and get flight recommendations based on your preferences, flight data, and available weather
+                information.
+              </p>
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Bot className="size-3 text-primary" /> Your saved flight preferences are considered automatically.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ai-query" className="text-xs">
+                What kind of flight are you looking for?
+              </Label>
+              <textarea
+                id="ai-query"
+                placeholder="e.g. I need a direct evening flight from Delhi to Mumbai"
+                value={aiQuery}
+                onChange={(e) => setAiQuery(e.target.value)}
+                rows={3}
+                className="flex min-h-[72px] w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/30 outline-none disabled:opacity-50 resize-none text-white"
+              />
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button onClick={doAiRecommend} disabled={aiLoading} className="gap-2 uppercase tracking-wider text-xs font-semibold">
+                  {aiLoading ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                  {aiLoading ? "Getting recommendations…" : "Get AI Recommendations"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={fillAiQueryFromSearch} disabled={aiLoading} className="text-xs border-white/10 bg-white/[0.03] hover:bg-white/10">
+                  Use current search
+                </Button>
               </div>
             </div>
-          )}
 
-          {aiLoading && (
-            <div className="space-y-3">
-              <div className="h-28 w-full rounded-lg bg-white/5 animate-pulse" />
-              <div className="h-20 w-full rounded-lg bg-white/5 animate-pulse" />
-            </div>
-          )}
+            {aiError && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex items-start gap-2">
+                <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-destructive">Recommendation failed</p>
+                  <p className="text-xs text-destructive/80">{aiError}</p>
+                </div>
+              </div>
+            )}
 
-          {aiResult && !aiLoading && (
-            <div className="space-y-4">
-              {aiResult.recommended_flight ? (
-                <div className="rounded-xl border border-primary/30 bg-primary/[0.07] p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Badge className="bg-primary text-primary-foreground text-[10px] uppercase tracking-widest">Recommended</Badge>
-                    <span className="text-xs text-muted-foreground">{aiResult.total_flights_evaluated} flights evaluated</span>
-                  </div>
-                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-sm font-semibold text-white">{aiResult.recommended_flight.flight.flight_number ?? "—"}</span>
-                        {aiResult.recommended_flight.flight.airline && (
-                          <span className="text-xs text-muted-foreground">{aiResult.recommended_flight.flight.airline}</span>
-                        )}
-                        {aiResult.recommended_flight.flight.status && (
-                          <Badge variant="outline" className="text-[10px] border-white/15 text-white">
-                            {aiResult.recommended_flight.flight.status}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="text-sm font-medium text-white">
-                        {aiResult.recommended_flight.flight.origin ?? "—"} → {aiResult.recommended_flight.flight.destination ?? "—"}
-                      </div>
-                      <div className="text-xs text-muted-foreground space-y-0.5">
-                        {aiResult.recommended_flight.flight.departure_time && (
-                          <div>Scheduled departure: {aiResult.recommended_flight.flight.departure_time}</div>
-                        )}
-                        {aiResult.recommended_flight.flight.arrival_time && (
-                          <div>Scheduled arrival: {aiResult.recommended_flight.flight.arrival_time}</div>
-                        )}
-                        {aiResult.recommended_flight.flight.aircraft && (
-                          <div className="flex items-center gap-1">
-                            <Plane className="size-3" /> {aiResult.recommended_flight.flight.aircraft}
-                          </div>
-                        )}
-                      </div>
+            {aiLoading && (
+              <div className="space-y-3">
+                <div className="h-28 w-full rounded-lg bg-white/5 animate-pulse" />
+                <div className="h-20 w-full rounded-lg bg-white/5 animate-pulse" />
+              </div>
+            )}
+
+            {aiResult && !aiLoading && (
+              <div className="space-y-4">
+                {aiResult.recommended_flight ? (
+                  <div className="rounded-xl border border-primary/30 bg-primary/[0.07] p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Badge className="bg-primary text-primary-foreground text-[10px] uppercase tracking-widest">Recommended</Badge>
+                      <span className="text-xs text-muted-foreground">{aiResult.total_flights_evaluated} flights evaluated</span>
                     </div>
-                    <Button size="sm" onClick={() => handleSelectRecommended(aiResult.recommended_flight!)} className="gap-1.5 shrink-0 uppercase tracking-wider text-xs">
-                      <Ticket className="size-4" /> Select flight
-                    </Button>
-                  </div>
-
-                  {aiResult.explanation && (
-                    <div className="space-y-1.5 pt-3 border-t border-white/10">
-                      <h4 className="text-xs font-semibold flex items-center gap-1 text-white">
-                        <Info className="size-3 text-primary" /> Why this flight
-                      </h4>
-                      <p className="text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">{aiResult.explanation}</p>
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-sm font-semibold text-white">{aiResult.recommended_flight.flight.flight_number ?? "—"}</span>
+                          {aiResult.recommended_flight.flight.airline && (
+                            <span className="text-xs text-muted-foreground">{aiResult.recommended_flight.flight.airline}</span>
+                          )}
+                          {aiResult.recommended_flight.flight.status && (
+                            <Badge variant="outline" className="text-[10px] border-white/15 text-white">
+                              {aiResult.recommended_flight.flight.status}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-sm font-medium text-white">
+                          {aiResult.recommended_flight.flight.origin ?? "—"} → {aiResult.recommended_flight.flight.destination ?? "—"}
+                        </div>
+                        <div className="text-xs text-muted-foreground space-y-0.5">
+                          {aiResult.recommended_flight.flight.departure_time && (
+                            <div>Scheduled departure: {aiResult.recommended_flight.flight.departure_time}</div>
+                          )}
+                          {aiResult.recommended_flight.flight.arrival_time && (
+                            <div>Scheduled arrival: {aiResult.recommended_flight.flight.arrival_time}</div>
+                          )}
+                          {aiResult.recommended_flight.flight.aircraft && (
+                            <div className="flex items-center gap-1">
+                              <Plane className="size-3" /> {aiResult.recommended_flight.flight.aircraft}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <Button size="sm" onClick={() => handleSelectRecommended(aiResult.recommended_flight!)} className="gap-1.5 shrink-0 uppercase tracking-wider text-xs">
+                        <Ticket className="size-4" /> Select flight
+                      </Button>
                     </div>
-                  )}
 
-                  {aiResult.limitations && aiResult.limitations.length > 0 && (
-                    <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 flex gap-2">
-                      <Info className="size-4 text-muted-foreground shrink-0 mt-0.5" />
-                      <div className="space-y-1">
-                        <p className="text-xs font-semibold text-white">Limitations</p>
-                        <ul className="list-disc ml-4 space-y-0.5 text-xs text-muted-foreground">
+                    {aiResult.explanation && (
+                      <div className="space-y-1.5 pt-3 border-t border-white/10">
+                        <h4 className="text-xs font-semibold flex items-center gap-1 text-white">
+                          <Info className="size-3 text-primary" /> Why this flight
+                        </h4>
+                        <p className="text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">{aiResult.explanation}</p>
+                      </div>
+                    )}
+
+                    {aiResult.limitations && aiResult.limitations.length > 0 && (
+                      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 flex gap-2">
+                        <Info className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <p className="text-xs font-semibold text-white">Limitations</p>
+                          <ul className="list-disc ml-4 space-y-0.5 text-xs text-muted-foreground">
+                            {aiResult.limitations.map((lim, idx) => (
+                              <li key={idx}>{lim}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 flex gap-3">
+                    <AlertCircle className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold text-white">No recommendation available</p>
+                      <p className="text-xs text-muted-foreground">{aiResult.explanation || "No flights matched your criteria."}</p>
+                      {aiResult.limitations && aiResult.limitations.length > 0 && (
+                        <ul className="list-disc ml-4 space-y-0.5 text-xs text-muted-foreground mt-1">
                           {aiResult.limitations.map((lim, idx) => (
                             <li key={idx}>{lim}</li>
                           ))}
                         </ul>
-                      </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 flex gap-3">
-                  <AlertCircle className="size-4 text-muted-foreground shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <p className="text-xs font-semibold text-white">No recommendation available</p>
-                    <p className="text-xs text-muted-foreground">{aiResult.explanation || "No flights matched your criteria."}</p>
-                    {aiResult.limitations && aiResult.limitations.length > 0 && (
-                      <ul className="list-disc ml-4 space-y-0.5 text-xs text-muted-foreground mt-1">
-                        {aiResult.limitations.map((lim, idx) => (
-                          <li key={idx}>{lim}</li>
-                        ))}
-                      </ul>
-                    )}
                   </div>
-                </div>
-              )}
+                )}
 
-              {aiResult.alternatives && aiResult.alternatives.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Other suitable options</h4>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {aiResult.alternatives.map((alt, idx) => (
-                      <div key={idx} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono text-xs font-semibold text-white">{alt.flight.flight_number ?? "—"}</span>
-                          <Badge variant="outline" className="text-[10px] border-white/15 text-white">
-                            {alt.flight.status ?? "—"}
-                          </Badge>
+                {aiResult.alternatives && aiResult.alternatives.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Other suitable options</h4>
+                    <div className="grid gap-2 sm:grid-cols-1 xl:grid-cols-2">
+                      {aiResult.alternatives.map((alt, idx) => (
+                        <div key={idx} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-xs font-semibold text-white">{alt.flight.flight_number ?? "—"}</span>
+                            <Badge variant="outline" className="text-[10px] border-white/15 text-white">
+                              {alt.flight.status ?? "—"}
+                            </Badge>
+                          </div>
+                          <div className="text-xs text-white">
+                            {alt.flight.origin ?? "—"} → {alt.flight.destination ?? "—"}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground truncate">
+                            {alt.flight.departure_time ?? ""} {alt.flight.departure_time && alt.flight.arrival_time ? "→" : ""} {alt.flight.arrival_time ?? ""}
+                          </div>
+                          <Button size="sm" variant="outline" className="w-full h-7 text-xs gap-1 border-white/10 bg-white/[0.03]" onClick={() => handleSelectRecommended(alt)}>
+                            <Ticket className="size-3" /> Select
+                          </Button>
                         </div>
-                        <div className="text-xs text-white">
-                          {alt.flight.origin ?? "—"} → {alt.flight.destination ?? "—"}
-                        </div>
-                        <div className="text-[11px] text-muted-foreground truncate">
-                          {alt.flight.departure_time ?? ""} {alt.flight.departure_time && alt.flight.arrival_time ? "→" : ""} {alt.flight.arrival_time ?? ""}
-                        </div>
-                        <Button size="sm" variant="outline" className="w-full h-7 text-xs gap-1 border-white/10 bg-white/[0.03]" onClick={() => handleSelectRecommended(alt)}>
-                          <Ticket className="size-3" /> Select
-                        </Button>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Flight Results — RESTORED */}
-        <div className="glass-panel rounded-xl p-6 space-y-4">
-          <div className="space-y-1">
+        {/* Full-width below two-column */}
+        <div className="space-y-8">
+          {/* Active Itineraries — PRESERVED */}
+          <div className="space-y-4">
             <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
-              <Search className="size-4 text-primary" /> Flight results
+              <Ticket className="size-4 text-primary" /> Active Itineraries
             </h2>
-            <p className="text-xs text-muted-foreground">{searchResults ? `${searchResults.length} flights` : "Search to see bookable flights."}</p>
-          </div>
 
-          {searchLoading && (
-            <div className="space-y-2">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-20 w-full rounded-lg bg-white/5 animate-pulse" />
-              ))}
-            </div>
-          )}
-
-          {searchResults && searchResults.length === 0 && !searchLoading && (
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 flex gap-3">
-              <AlertCircle className="size-4 text-muted-foreground shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-white">No flights found</p>
-                <p className="text-xs text-muted-foreground">No matching flights.</p>
+            {loading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="size-8 animate-spin text-primary" />
               </div>
-            </div>
-          )}
+            ) : bookings.length === 0 ? (
+              <div className="glass-panel rounded-xl p-12 text-center flex flex-col items-center justify-center space-y-4">
+                <Ticket className="size-12 text-white/10" />
+                <p className="font-mono text-sm text-muted-foreground">No active itineraries.</p>
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {bookings.map((booking) => (
+                  <div key={booking.id} className="glass-panel rounded-xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 hover:border-primary/30 transition-colors">
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <span className="px-2 py-0.5 rounded bg-primary/20 text-primary text-[10px] uppercase tracking-widest font-mono font-bold">
+                          {booking.status}
+                        </span>
+                        <span className="font-mono text-xs text-muted-foreground">REF: {booking.id}</span>
+                      </div>
 
-          {searchResults && searchResults.length > 0 && (
-            <div className="space-y-2">
-              {searchResults.map((f) => {
-                const key = f.flightNumber ?? f.flightIata ?? Math.random().toString();
-                return (
-                  <div key={key} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white/[0.06] transition-colors">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm font-semibold text-white">{f.flightIata ?? f.flightNumber ?? "—"}</span>
-                        <Badge variant="outline" className="text-[10px] border-white/15 text-white">
-                          {f.status ?? "—"}
-                        </Badge>
-                      </div>
-                      <div className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Building2 className="size-3" />
-                        {f.airlineName ?? f.airlineIata ?? "—"} • <Plane className="size-3" />
-                        {f.aircraftRegistration ?? "—"}
-                      </div>
-                      <div className="text-xs text-white">
-                        {f.departureIata ?? "—"} → {f.arrivalIata ?? "—"}{" "}
-                        <span className="text-muted-foreground">{f.departureScheduled ? format(new Date(f.departureScheduled), "MMM dd, HH:mm") : ""}</span>
+                      <div className="flex items-center gap-6">
+                        <div className="space-y-1">
+                          <p className="text-3xl font-mono text-white">{booking.origin ?? "—"}</p>
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {booking.departureScheduled ? format(new Date(booking.departureScheduled), "MMM dd, HH:mm") : "—"}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-center gap-1 opacity-50 px-4">
+                          <ArrowRight className="size-4" />
+                        </div>
+                        <div className="space-y-1 text-right">
+                          <p className="text-3xl font-mono text-white">{booking.destination ?? "—"}</p>
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {booking.arrivalScheduled ? format(new Date(booking.arrivalScheduled), "MMM dd, HH:mm") : "—"}
+                          </p>
+                        </div>
                       </div>
                     </div>
-                    <Button size="sm" onClick={() => openBooking(f)} className="gap-1.5 shrink-0 uppercase tracking-wider text-xs">
-                      <Ticket className="size-4" /> Book
-                    </Button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
 
-          {!searchResults && !searchLoading && !searchError && (
-            <p className="text-xs text-muted-foreground">Use search above.</p>
-          )}
+                    <div className="flex flex-col items-end gap-4 w-full md:w-auto border-t md:border-t-0 md:border-l border-white/5 pt-4 md:pt-0 md:pl-6">
+                      <div className="text-right">
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Airline</p>
+                        <p className="text-lg font-mono text-white">{booking.airlineName || "Unknown"}</p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-xs uppercase tracking-wider font-semibold border-white/10 bg-white/[0.03]"
+                        onClick={() => navigate(`/tracking?flight_iata=${booking.flightNumber}`)}
+                      >
+                        View Flight
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* My bookings — PRESERVED */}
+          <div className="glass-panel rounded-xl p-6 space-y-4">
+            <div className="flex flex-row items-center justify-between gap-4">
+              <div className="space-y-1">
+                <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
+                  <Calendar className="size-4 text-primary" /> My bookings
+                </h2>
+                <p className="text-xs text-muted-foreground">Your booking history. Refresh to sync with server.</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => loadHistory(page)} disabled={loadingHistory} className="gap-1.5 border-white/10 bg-white/[0.03] text-xs">
+                <RefreshCw className={`size-4 ${loadingHistory ? "animate-spin" : ""}`} /> Refresh
+              </Button>
+            </div>
+
+            {loadingHistory && (
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-12 w-full rounded-lg bg-white/5 animate-pulse" />
+                ))}
+              </div>
+            )}
+
+            {historyError && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex gap-2">
+                <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+                <p className="text-xs text-destructive">{historyError}</p>
+              </div>
+            )}
+
+            {!loadingHistory && myBookings && myBookings.length === 0 && (
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-6 flex flex-col items-center gap-2 text-center">
+                <Ticket className="size-8 text-white/10" />
+                <p className="text-xs font-semibold text-white">No bookings yet</p>
+                <p className="text-xs text-muted-foreground">Search and book a flight to see it here.</p>
+              </div>
+            )}
+
+            {myBookings && myBookings.length > 0 && (
+              <>
+                <div className="rounded-xl border border-white/10 overflow-hidden bg-white/[0.02]">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-white/10 hover:bg-transparent">
+                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Flight</TableHead>
+                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Route</TableHead>
+                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Status</TableHead>
+                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Created</TableHead>
+                          <TableHead className="text-xs"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {myBookings.map((b) => (
+                          <TableRow key={b.id} className="border-white/5 hover:bg-white/[0.04]">
+                            <TableCell className="font-mono text-xs text-white">{b.flightNumber}</TableCell>
+                            <TableCell className="text-xs text-white">
+                              {b.origin} → {b.destination}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="secondary" className="text-[10px] bg-white/10 text-white border-white/10">
+                                {b.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{new Date(b.createdAt).toLocaleDateString()}</TableCell>
+                            <TableCell>
+                              <Button variant="ghost" size="sm" className="h-7 text-xs hover:bg-white/10" onClick={() => loadBookingDetail(b.id)}>
+                                View
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+
+                {pageInfo && pageInfo.totalPages > 1 && (
+                  <Pagination className="justify-center">
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious href="#" onClick={(e) => { e.preventDefault(); if (page > 0) loadHistory(page - 1); }} className={page === 0 ? "pointer-events-none opacity-50" : "hover:bg-white/10"} />
+                      </PaginationItem>
+                      {Array.from({ length: Math.min(pageInfo.totalPages, 5) }).map((_, i) => (
+                        <PaginationItem key={i}>
+                          <PaginationLink href="#" isActive={i === page} onClick={(e) => { e.preventDefault(); loadHistory(i); }} className="hover:bg-white/10 data-[active=true]:bg-primary data-[active=true]:text-primary-foreground">
+                            {i + 1}
+                          </PaginationLink>
+                        </PaginationItem>
+                      ))}
+                      <PaginationItem>
+                        <PaginationNext href="#" onClick={(e) => { e.preventDefault(); if (page < pageInfo.totalPages - 1) loadHistory(page + 1); }} className={page >= pageInfo.totalPages - 1 ? "pointer-events-none opacity-50" : "hover:bg-white/10"} />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                )}
+                {pageInfo && <p className="text-xs text-center text-muted-foreground">Page {pageInfo.page + 1} of {pageInfo.totalPages} • {pageInfo.totalElements} total</p>}
+              </>
+            )}
+          </div>
         </div>
 
         {/* Booking dialog — RESTORED */}
@@ -688,172 +889,6 @@ export function BookingPage() {
             )}
           </DialogContent>
         </Dialog>
-
-        {/* Active Itineraries — PRESERVED */}
-        <div className="space-y-4">
-          <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
-            <Ticket className="size-4 text-primary" /> Active Itineraries
-          </h2>
-
-          {loading ? (
-            <div className="flex justify-center py-12">
-              <Loader2 className="size-8 animate-spin text-primary" />
-            </div>
-          ) : bookings.length === 0 ? (
-            <div className="glass-panel rounded-xl p-12 text-center flex flex-col items-center justify-center space-y-4">
-              <Ticket className="size-12 text-white/10" />
-              <p className="font-mono text-sm text-muted-foreground">No active itineraries.</p>
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              {bookings.map((booking) => (
-                <div key={booking.id} className="glass-panel rounded-xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 hover:border-primary/30 transition-colors">
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-3">
-                      <span className="px-2 py-0.5 rounded bg-primary/20 text-primary text-[10px] uppercase tracking-widest font-mono font-bold">
-                        {booking.status}
-                      </span>
-                      <span className="font-mono text-xs text-muted-foreground">REF: {booking.id}</span>
-                    </div>
-
-                    <div className="flex items-center gap-6">
-                      <div className="space-y-1">
-                        <p className="text-3xl font-mono text-white">{booking.origin ?? "—"}</p>
-                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                          {booking.departureScheduled ? format(new Date(booking.departureScheduled), "MMM dd, HH:mm") : "—"}
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-center gap-1 opacity-50 px-4">
-                        <ArrowRight className="size-4" />
-                      </div>
-                      <div className="space-y-1 text-right">
-                        <p className="text-3xl font-mono text-white">{booking.destination ?? "—"}</p>
-                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                          {booking.arrivalScheduled ? format(new Date(booking.arrivalScheduled), "MMM dd, HH:mm") : "—"}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-4 w-full md:w-auto border-t md:border-t-0 md:border-l border-white/5 pt-4 md:pt-0 md:pl-6">
-                    <div className="text-right">
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Airline</p>
-                      <p className="text-lg font-mono text-white">{booking.airlineName || "Unknown"}</p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-xs uppercase tracking-wider font-semibold border-white/10 bg-white/[0.03]"
-                      onClick={() => navigate(`/tracking?flight_iata=${booking.flightNumber}`)}
-                    >
-                      View Flight
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* My bookings — RESTORED */}
-        <div className="glass-panel rounded-xl p-6 space-y-4">
-          <div className="flex flex-row items-center justify-between gap-4">
-            <div className="space-y-1">
-              <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
-                <Calendar className="size-4 text-primary" /> My bookings
-              </h2>
-              <p className="text-xs text-muted-foreground">Your booking history. Refresh to sync with server.</p>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => loadHistory(page)} disabled={loadingHistory} className="gap-1.5 border-white/10 bg-white/[0.03] text-xs">
-              <RefreshCw className={`size-4 ${loadingHistory ? "animate-spin" : ""}`} /> Refresh
-            </Button>
-          </div>
-
-          {loadingHistory && (
-            <div className="space-y-2">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-12 w-full rounded-lg bg-white/5 animate-pulse" />
-              ))}
-            </div>
-          )}
-
-          {historyError && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex gap-2">
-              <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
-              <p className="text-xs text-destructive">{historyError}</p>
-            </div>
-          )}
-
-          {!loadingHistory && myBookings && myBookings.length === 0 && (
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-6 flex flex-col items-center gap-2 text-center">
-              <Ticket className="size-8 text-white/10" />
-              <p className="text-xs font-semibold text-white">No bookings yet</p>
-              <p className="text-xs text-muted-foreground">Search and book a flight to see it here.</p>
-            </div>
-          )}
-
-          {myBookings && myBookings.length > 0 && (
-            <>
-              <div className="rounded-xl border border-white/10 overflow-hidden bg-white/[0.02]">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="border-white/10 hover:bg-transparent">
-                        <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Flight</TableHead>
-                        <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Route</TableHead>
-                        <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Status</TableHead>
-                        <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Created</TableHead>
-                        <TableHead className="text-xs"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {myBookings.map((b) => (
-                        <TableRow key={b.id} className="border-white/5 hover:bg-white/[0.04]">
-                          <TableCell className="font-mono text-xs text-white">{b.flightNumber}</TableCell>
-                          <TableCell className="text-xs text-white">
-                            {b.origin} → {b.destination}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="secondary" className="text-[10px] bg-white/10 text-white border-white/10">
-                              {b.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{new Date(b.createdAt).toLocaleDateString()}</TableCell>
-                          <TableCell>
-                            <Button variant="ghost" size="sm" className="h-7 text-xs hover:bg-white/10" onClick={() => loadBookingDetail(b.id)}>
-                              View
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-
-              {pageInfo && pageInfo.totalPages > 1 && (
-                <Pagination className="justify-center">
-                  <PaginationContent>
-                    <PaginationItem>
-                      <PaginationPrevious href="#" onClick={(e) => { e.preventDefault(); if (page > 0) loadHistory(page - 1); }} className={page === 0 ? "pointer-events-none opacity-50" : "hover:bg-white/10"} />
-                    </PaginationItem>
-                    {Array.from({ length: Math.min(pageInfo.totalPages, 5) }).map((_, i) => (
-                      <PaginationItem key={i}>
-                        <PaginationLink href="#" isActive={i === page} onClick={(e) => { e.preventDefault(); loadHistory(i); }} className="hover:bg-white/10 data-[active=true]:bg-primary data-[active=true]:text-primary-foreground">
-                          {i + 1}
-                        </PaginationLink>
-                      </PaginationItem>
-                    ))}
-                    <PaginationItem>
-                      <PaginationNext href="#" onClick={(e) => { e.preventDefault(); if (page < pageInfo.totalPages - 1) loadHistory(page + 1); }} className={page >= pageInfo.totalPages - 1 ? "pointer-events-none opacity-50" : "hover:bg-white/10"} />
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
-              )}
-              {pageInfo && <p className="text-xs text-center text-muted-foreground">Page {pageInfo.page + 1} of {pageInfo.totalPages} • {pageInfo.totalElements} total</p>}
-            </>
-          )}
-        </div>
 
         <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
           <DialogContent className="bg-card border-white/10">
