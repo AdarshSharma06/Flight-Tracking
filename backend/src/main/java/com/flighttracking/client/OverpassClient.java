@@ -3,15 +3,13 @@ package com.flighttracking.client;
 import com.flighttracking.config.OverpassProperties;
 import com.flighttracking.dto.airport.AirportExplorerDto;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.util.UriComponentsBuilder;
 
-import java.net.URI;
 import java.util.*;
 
 @Component
@@ -21,11 +19,9 @@ public class OverpassClient {
     private static final double BBOX_OFFSET = 0.025;
 
     private final RestClient restClient;
-    private final OverpassProperties properties;
 
     public OverpassClient(RestClient overpassRestClient, OverpassProperties properties) {
         this.restClient = overpassRestClient;
-        this.properties = properties;
     }
 
     public AirportExplorerDto fetchAirportData(String iata, double latitude, double longitude) {
@@ -35,40 +31,26 @@ public class OverpassClient {
         double east = longitude + BBOX_OFFSET;
         String bbox = south + "," + west + "," + north + "," + east;
 
-        String query = "[out:json][timeout:12];\n"
+        String query = "[out:json][timeout:25];\n"
                 + "(\n"
                 + "  way[\"aeroway\"=\"runway\"](" + bbox + ");\n"
                 + "  way[\"aeroway\"=\"taxiway\"](" + bbox + ");\n"
-                + "  way[\"building\"=\"terminal\"](" + bbox + ");\n"
-                + "  way[\"building\"=\"aerodrome\"](" + bbox + ");\n"
-                + "  way[\"building\"=\"hotel\"](" + bbox + ");\n"
+                + "  way[\"building\"~\"terminal|aerodrome\"](" + bbox + ");\n"
                 + "  node[\"aeroway\"=\"gate\"](" + bbox + ");\n"
                 + "  way[\"amenity\"=\"parking\"](" + bbox + ");\n"
-                + "  node[\"amenity\"=\"parking_entrance\"](" + bbox + ");\n"
+                + "  node[\"railway\"~\"station|stop\"](" + bbox + ");\n"
                 + "  node[\"highway\"=\"bus_stop\"](" + bbox + ");\n"
-                + "  node[\"railway\"=\"station\"](" + bbox + ");\n"
-                + "  node[\"railway\"=\"stop\"](" + bbox + ");\n"
-                + "  node[\"aeroway\"=\"helipad\"](" + bbox + ");\n"
-                + "  node[\"amenity\"=\"restaurant\"](" + bbox + ");\n"
-                + "  node[\"amenity\"=\"cafe\"](" + bbox + ");\n"
-                + "  node[\"amenity\"=\"bar\"](" + bbox + ");\n"
-                + "  node[\"shop\"=\"duty_free\"](" + bbox + ");\n"
-                + "  node[\"tourism\"=\"hotel\"](" + bbox + ");\n"
-                + "  node[\"amenity\"=\"atm\"](" + bbox + ");\n"
-                + "  node[\"amenity\"=\"bank\"](" + bbox + ");\n"
+                + "  node[\"amenity\"~\"restaurant|cafe|bar\"](" + bbox + ");\n"
                 + ");\n"
                 + "out body;\n"
                 + ">;\n"
                 + "out skel qt;";
 
-        URI uri = UriComponentsBuilder.fromPath("/interpreter")
-                .queryParam("data", query)
-                .build().toUri();
-
         try {
-            log.debug("Calling Overpass API for airport {}: {}", iata, uri);
-            OverpassResponse response = restClient.get()
-                    .uri(uri)
+            log.debug("Calling Overpass API (POST) for airport {}", iata);
+            OverpassResponse response = restClient.post()
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .body("data=" + query)
                     .retrieve()
                     .body(OverpassResponse.class);
 
@@ -77,6 +59,7 @@ public class OverpassClient {
                 return emptyExplorer(iata);
             }
 
+            log.info("Overpass returned {} elements for {}", response.elements.size(), iata);
             return parseResponse(iata, response);
         } catch (RestClientException e) {
             log.error("Overpass API request failed for {}: {}", iata, e.getMessage());
@@ -106,18 +89,23 @@ public class OverpassClient {
 
         for (OverpassElement el : response.elements) {
             Map<String, String> tags = el.tags != null ? el.tags : Map.of();
-            String category = tags.getOrDefault("aeroway", tags.getOrDefault("building",
-                    tags.getOrDefault("amenity", tags.getOrDefault("railway",
-                            tags.getOrDefault("highway", tags.getOrDefault("shop",
-                                    tags.getOrDefault("tourism", "")))))));
+            if (tags.isEmpty()) continue;
+
+            String aeroway = tags.get("aeroway");
+            String building = tags.get("building");
+            String amenity = tags.get("amenity");
+            String railway = tags.get("railway");
+            String highway = tags.get("highway");
 
             AirportExplorerDto.GeoFeature feature = null;
 
             if ("way".equals(el.type) && el.nodes != null) {
                 List<double[]> geometry = resolveWayGeometry(el.nodes, nodeMap);
+                if (geometry.isEmpty()) continue;
                 double[] center = computeCenter(geometry);
                 feature = new AirportExplorerDto.GeoFeature(
-                        String.valueOf(el.id), category,
+                        String.valueOf(el.id),
+                        aeroway != null ? aeroway : building != null ? building : amenity != null ? amenity : "unknown",
                         tags.getOrDefault("name", ""),
                         tags.getOrDefault("ref", tags.getOrDefault("designation", "")),
                         center[0], center[1],
@@ -125,6 +113,8 @@ public class OverpassClient {
                         tags
                 );
             } else if ("node".equals(el.type) && el.lat != null && el.lon != null) {
+                String category = aeroway != null ? aeroway : amenity != null ? amenity
+                        : railway != null ? railway : highway != null ? highway : "unknown";
                 feature = new AirportExplorerDto.GeoFeature(
                         String.valueOf(el.id), category,
                         tags.getOrDefault("name", ""),
@@ -137,18 +127,20 @@ public class OverpassClient {
 
             if (feature == null) continue;
 
-            if ("runway".equals(category)) runways.add(feature);
-            else if ("taxiway".equals(category)) taxiways.add(feature);
-            else if ("terminal".equals(category) || "aerodrome".equals(category)) terminals.add(feature);
-            else if ("gate".equals(category)) gates.add(feature);
-            else if ("parking".equals(category)) parking.add(feature);
-            else if ("hotel".equals(category)) buildings.add(feature);
-            else if ("station".equals(category) || "stop".equals(category)
-                    || ("bus_stop".equals(tags.get("highway")))) transport.add(feature);
-            else if ("restaurant".equals(category) || "cafe".equals(category)
-                    || "bar".equals(category) || "duty_free".equals(category)
-                    || "atm".equals(category) || "bank".equals(category)) amenities.add(feature);
+            String cat = feature.category();
+            if ("runway".equals(cat)) runways.add(feature);
+            else if ("taxiway".equals(cat)) taxiways.add(feature);
+            else if ("terminal".equals(cat) || "aerodrome".equals(cat)) terminals.add(feature);
+            else if ("gate".equals(cat)) gates.add(feature);
+            else if ("parking".equals(cat)) parking.add(feature);
+            else if ("hotel".equals(cat) || "aerodrome".equals(building)) buildings.add(feature);
+            else if ("station".equals(cat) || "stop".equals(cat) || "bus_stop".equals(cat)) transport.add(feature);
+            else if ("restaurant".equals(cat) || "cafe".equals(cat) || "bar".equals(cat)
+                    || "duty_free".equals(cat) || "atm".equals(cat) || "bank".equals(cat)) amenities.add(feature);
         }
+
+        log.info("Parsed DEL {}: runways={}, taxiways={}, terminals={}, gates={}, parking={}, transport={}, amenities={}",
+                iata, runways.size(), taxiways.size(), terminals.size(), gates.size(), parking.size(), transport.size(), amenities.size());
 
         return new AirportExplorerDto(iata.toUpperCase(), runways, taxiways, terminals, buildings, gates, parking, transport, amenities);
     }
