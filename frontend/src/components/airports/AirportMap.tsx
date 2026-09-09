@@ -11,13 +11,12 @@ interface AirportMapProps {
 
 const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
 
-let mapsLoaded = false;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let cachedMap: any = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let cachedMarker: any = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let cachedMaps: any = null;
+let cachedLibs: { Map: any; AdvancedMarkerElement: any } | null = null;
 
 export function AirportMap({ latitude, longitude, label, className = "" }: AirportMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -37,24 +36,25 @@ export function AirportMap({ latitude, longitude, label, className = "" }: Airpo
 
     async function init() {
       try {
-        if (!mapsLoaded) {
+        if (!cachedLibs) {
           setOptions({
             key: API_KEY,
             v: "weekly",
           });
-          // Load the core + marker libraries
-          const [mapsLib] = await Promise.all([
+          const [mapsLib, markerLib] = await Promise.all([
             importLibrary("maps"),
             importLibrary("marker"),
           ]);
           if (cancelled) return;
-          cachedMaps = mapsLib;
-          mapsLoaded = true;
+          cachedLibs = {
+            Map: mapsLib.Map,
+            AdvancedMarkerElement: markerLib.AdvancedMarkerElement,
+          };
         }
 
         if (!mapRef.current || cancelled) return;
 
-        const center = new cachedMaps.LatLng(latitude, longitude);
+        const center = { lat: latitude, lng: longitude };
 
         // Destroy previous map if navigating between airports
         if (cachedMap) {
@@ -62,7 +62,7 @@ export function AirportMap({ latitude, longitude, label, className = "" }: Airpo
           cachedMarker = null;
         }
 
-        const map = new cachedMaps.Map(mapRef.current, {
+        const map = new cachedLibs.Map(mapRef.current, {
           center,
           zoom: 13,
           mapTypeControl: false,
@@ -84,12 +84,16 @@ export function AirportMap({ latitude, longitude, label, className = "" }: Airpo
           ],
         });
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const marker = new (window as any).google.maps.Marker({
+        const iata = label?.split(" — ")[0] ?? "";
+        const pin = document.createElement("div");
+        pin.style.cssText = "display:flex;align-items:center;justify-content:center;";
+        pin.innerHTML = `<div style="background:#38bdf8;color:#0f172a;border-radius:9999px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:9px;letter-spacing:0.5px;box-shadow:0 0 12px rgba(56,189,248,0.5);border:2px solid #fff;">${iata}</div>`;
+
+        const marker = new cachedLibs.AdvancedMarkerElement({
           position: center,
           map,
           title: label ?? "Airport",
-          animation: cachedMaps.Animation?.DROP,
+          content: pin,
         });
 
         if (!cancelled) {
@@ -114,12 +118,12 @@ export function AirportMap({ latitude, longitude, label, className = "" }: Airpo
 
   // Re-center map when coordinates change
   useEffect(() => {
-    if (status !== "ready" || !cachedMap || !cachedMaps) return;
+    if (status !== "ready" || !cachedMap) return;
 
-    const center = new cachedMaps.LatLng(latitude, longitude);
+    const center = { lat: latitude, lng: longitude };
     cachedMap.setCenter(center);
     if (cachedMarker) {
-      cachedMarker.setPosition(center);
+      cachedMarker.position = center;
     }
   }, [latitude, longitude, status]);
 
