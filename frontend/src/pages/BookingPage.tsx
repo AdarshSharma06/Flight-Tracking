@@ -9,7 +9,6 @@ import type {
   PageResponse,
   IgnavItineraryDto,
   IgnavProviderLink,
-  IgnavSegmentDto,
 } from "@/types/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
