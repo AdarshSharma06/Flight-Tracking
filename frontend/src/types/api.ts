@@ -129,6 +129,16 @@ export interface BookingResponse {
   aircraftRegistration: string | null;
   status: string;
   createdAt: string;
+  ignavId: string | null;
+  priceAmount: number | null;
+  priceCurrency: string | null;
+  priceStatus: string | null;
+  providerName: string | null;
+  providerType: string | null;
+  bookingUrl: string | null;
+  cabin: string | null;
+  duration: string | null;
+  stops: number | null;
 }
 
 export interface BookingRequest {
@@ -139,6 +149,91 @@ export interface BookingRequest {
   arrivalScheduled?: string | null;
   airlineName?: string | null;
   aircraftRegistration?: string | null;
+  ignavId?: string | null;
+  priceAmount?: number | null;
+  priceCurrency?: string | null;
+  priceStatus?: string | null;
+  providerName?: string | null;
+  providerType?: string | null;
+  bookingUrl?: string | null;
+  cabin?: string | null;
+  duration?: string | null;
+  stops?: number | null;
+  ignavLegsJson?: string | null;
+}
+
+// ── Ignav types ──────────────────────────────────────────────
+
+export interface IgnavSearchRequest {
+  origin: string;
+  destination: string;
+  departureDate: string;
+  returnDate?: string | null;
+  adults?: number;
+  cabin?: string | null;
+  maxStops?: number | null;
+  market?: string | null;
+  tripType?: string | null;
+}
+
+export interface IgnavLegDto {
+  origin: string | null;
+  destination: string | null;
+  departureTime: string | null;
+  arrivalTime: string | null;
+  airline: string | null;
+  flightNumber: string | null;
+  aircraft: string | null;
+  duration: string | null;
+}
+
+export interface IgnavItineraryDto {
+  ignavId: string;
+  airline: string | null;
+  airlineCode: string | null;
+  flightNumber: string | null;
+  origin: string | null;
+  destination: string | null;
+  departureTime: string | null;
+  arrivalTime: string | null;
+  duration: string | null;
+  stops: number | null;
+  aircraft: string | null;
+  cabin: string | null;
+  priceAmount: number | null;
+  priceCurrency: string | null;
+  priceStatus: string | null;
+  legs: IgnavLegDto[];
+  segments: { origin: string | null; destination: string | null; departureTime: string | null; arrivalTime: string | null; duration: string | null }[];
+}
+
+export interface IgnavSearchResponse {
+  itineraries: IgnavItineraryDto[];
+  count: number;
+  requestId: string | null;
+}
+
+export interface IgnavBookingLinksRequest {
+  ignavId: string;
+}
+
+export interface IgnavProviderLink {
+  providerName: string | null;
+  providerType: string | null;
+  priceAmount: number | null;
+  priceCurrency: string | null;
+  priceStatus: string | null;
+  url: string | null;
+}
+
+export interface IgnavBookingOption {
+  legIndexes: number[];
+  links: IgnavProviderLink[];
+}
+
+export interface IgnavBookingLinksResponse {
+  ignavId: string;
+  bookingOptions: IgnavBookingOption[];
 }
 
 export interface HealthResponse {

@@ -1,10 +1,16 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { bookingService } from "@/services/booking.service";
-import { flightService, type FlightSearchParams } from "@/services/flight.service";
+import { ignavService } from "@/services/ignav.service";
 import { aiService, type RecommendationResponse } from "@/services/ai.service";
 import { ApiError } from "@/services/api";
-import type { BookingResponse, FlightDto, PageResponse } from "@/types/api";
+import type {
+  BookingResponse,
+  PageResponse,
+  IgnavItineraryDto,
+  IgnavProviderLink,
+  IgnavBookingOption,
+} from "@/types/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -28,6 +34,7 @@ import {
   Calendar,
   Building2,
   CheckCircle2,
+  ExternalLink,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -36,41 +43,38 @@ export function BookingPage() {
   const [bookings, setBookings] = useState<BookingResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Search state — restored to OLD frontend contract
-  const [flightIata, setFlightIata] = useState("");
-  const [depIata, setDepIata] = useState("");
-  const [arrIata, setArrIata] = useState("");
-  const [airlineIata, setAirlineIata] = useState("");
-  const [flightStatus, setFlightStatus] = useState("");
-  const [limit, setLimit] = useState("10");
+  // ── Ignav search state ──
+  const [origin, setOrigin] = useState("");
+  const [destination, setDestination] = useState("");
+  const [departureDate, setDepartureDate] = useState("");
+  const [returnDate, setReturnDate] = useState("");
+  const [tripType, setTripType] = useState("ONE_WAY");
+  const [adults, setAdults] = useState("1");
+  const [cabin, setCabin] = useState("economy");
+  const [maxStops, setMaxStops] = useState("any");
+  const [market, setMarket] = useState("");
 
-  const [searchResults, setSearchResults] = useState<FlightDto[] | null>(null);
+  const [searchResults, setSearchResults] = useState<IgnavItineraryDto[] | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
-  // AI recommendation — preserved (DO NOT CHANGE LOGIC)
+  // ── AI recommendation — preserved (DO NOT CHANGE LOGIC) ──
   const [aiQuery, setAiQuery] = useState("");
   const [aiResult, setAiResult] = useState<RecommendationResponse | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
-  // Booking dialog — restored
-  const [bookingFlight, setBookingFlight] = useState<FlightDto | null>(null);
-  const [bookingForm, setBookingForm] = useState({
-    flightNumber: "",
-    origin: "",
-    destination: "",
-    departureScheduled: "",
-    arrivalScheduled: "",
-    airlineName: "",
-    aircraftRegistration: "",
-  });
-  const [bookingDialogLoading, setBookingDialogLoading] = useState(false);
-  const [bookingDialogError, setBookingDialogError] = useState<string | null>(null);
-  const [bookingSuccess, setBookingSuccess] = useState<BookingResponse | null>(null);
-  const [bookingError, setBookingError] = useState<string | null>(null);
+  // ── Booking-links state ──
+  const [selectedItinerary, setSelectedItinerary] = useState<IgnavItineraryDto | null>(null);
+  const [bookingOptions, setBookingOptions] = useState<IgnavBookingOption[]>([]);
+  const [bookingLinksLoading, setBookingLinksLoading] = useState(false);
+  const [bookingLinksError, setBookingLinksError] = useState<string | null>(null);
 
-  // My bookings paginated history — restored
+  // ── Book click state ──
+  const [bookingSaving, setBookingSaving] = useState(false);
+  const [bookingSavingError, setBookingSavingError] = useState<string | null>(null);
+
+  // ── My bookings paginated history ──
   const [myBookings, setMyBookings] = useState<BookingResponse[] | null>(null);
   const [pageInfo, setPageInfo] = useState<{ page: number; size: number; totalPages: number; totalElements: number } | null>(null);
   const [page, setPage] = useState(0);
@@ -97,99 +101,142 @@ export function BookingPage() {
     }
   };
 
-  // Restored search handler — matches OLD frontend exactly
+  // ── Ignav search handler ──
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    const params: FlightSearchParams = {};
-    if (flightIata.trim()) params.flight_iata = flightIata.trim();
-    if (depIata.trim()) params.dep_iata = depIata.trim().toUpperCase();
-    if (arrIata.trim()) params.arr_iata = arrIata.trim().toUpperCase();
-    if (airlineIata.trim()) params.airline_iata = airlineIata.trim().toUpperCase();
-    if (flightStatus && flightStatus !== "all") params.flight_status = flightStatus;
-    const l = parseInt(limit, 10);
-    if (!isNaN(l)) params.limit = l;
+    const o = origin.trim().toUpperCase();
+    const d = destination.trim().toUpperCase();
+    if (!o || o.length !== 3) { setSearchError("Enter a valid 3-letter origin IATA code."); return; }
+    if (!d || d.length !== 3) { setSearchError("Enter a valid 3-letter destination IATA code."); return; }
+    if (o === d) { setSearchError("Origin and destination must differ."); return; }
+    if (!departureDate) { setSearchError("Select a departure date."); return; }
+    if (tripType === "ROUND_TRIP" && !returnDate) { setSearchError("Select a return date for round-trip."); return; }
 
-    if (!params.flight_iata && !params.dep_iata && !params.arr_iata && !params.airline_iata && !params.flight_status) {
-      setSearchError("Enter at least one filter.");
-      return;
-    }
     setSearchError(null);
     setSearchLoading(true);
     setSearchResults(null);
+    setSelectedItinerary(null);
+    setBookingOptions([]);
+    setBookingLinksError(null);
     try {
-      const res = await flightService.search(params);
-      setSearchResults(res.flights);
-      if (res.flights.length === 0) {
-        setSearchError("No flights found.");
+      const res = await ignavService.search({
+        origin: o,
+        destination: d,
+        departureDate,
+        returnDate: tripType === "ROUND_TRIP" ? returnDate : undefined,
+        adults: parseInt(adults, 10) || 1,
+        cabin: cabin || undefined,
+        maxStops: maxStops === "any" ? undefined : parseInt(maxStops, 10),
+        market: market.trim().toUpperCase() || undefined,
+        tripType: tripType || undefined,
+      });
+      setSearchResults(res.itineraries ?? []);
+      if (!res.itineraries || res.itineraries.length === 0) {
+        setSearchError("No flights found for this route and date.");
       }
     } catch (err: unknown) {
       if (err instanceof ApiError) setSearchError(err.message);
-      else setSearchError("Search failed.");
+      else setSearchError("Search failed. Please try again.");
     } finally {
       setSearchLoading(false);
     }
   };
 
-  // --- AI helpers (from old frontend) — DO NOT MODIFY LOGIC ---
-  const recommendationToDto = (flight: NonNullable<RecommendationResponse["recommended_flight"]>["flight"]): FlightDto => ({
-    flightNumber: flight.flight_number ?? null,
-    flightIata: flight.flight_number ?? null,
-    flightIcao: null,
-    airlineName: flight.airline ?? null,
-    airlineIata: flight.airline ?? null,
-    airlineIcao: null,
-    departureAirport: null,
-    departureIata: flight.origin ?? null,
-    departureIcao: null,
-    departureTerminal: null,
-    departureGate: null,
-    departureScheduled: flight.departure_time ?? null,
-    departureEstimated: null,
-    departureActual: null,
-    departureDelay: null,
-    arrivalAirport: null,
-    arrivalIata: flight.destination ?? null,
-    arrivalIcao: null,
-    arrivalTerminal: null,
-    arrivalGate: null,
-    arrivalScheduled: flight.arrival_time ?? null,
-    arrivalEstimated: null,
-    arrivalActual: null,
-    arrivalDelay: null,
-    status: flight.status ?? null,
-    aircraftRegistration: flight.aircraft ?? null,
-    aircraftIata: null,
-    aircraftIcao: null,
-  });
-
-  const openBooking = (f: FlightDto) => {
-    setBookingFlight(f);
-    setBookingForm({
-      flightNumber: f.flightIata ?? f.flightNumber ?? "",
-      origin: f.departureIata ?? "",
-      destination: f.arrivalIata ?? "",
-      departureScheduled: f.departureScheduled ?? "",
-      arrivalScheduled: f.arrivalScheduled ?? "",
-      airlineName: f.airlineName ?? "",
-      aircraftRegistration: f.aircraftRegistration ?? "",
-    });
-    setBookingDialogError(null);
-    setBookingSuccess(null);
+  // ── Select itinerary → fetch booking links ──
+  const handleSelectItinerary = async (itinerary: IgnavItineraryDto) => {
+    setSelectedItinerary(itinerary);
+    setBookingOptions([]);
+    setBookingLinksError(null);
+    setBookingSavingError(null);
+    setBookingLinksLoading(true);
+    try {
+      const res = await ignavService.bookingLinks({ ignavId: itinerary.ignavId });
+      setBookingOptions(res.bookingOptions ?? []);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) setBookingLinksError(err.message);
+      else setBookingLinksError("Failed to fetch booking options.");
+    } finally {
+      setBookingLinksLoading(false);
+    }
   };
+
+  // ── Book click → save itinerary + redirect ──
+  // NOTE: bookingUrl is NOT sent to backend for security.
+  // The redirect uses the in-memory link.url from Ignav's trusted response.
+  // Active Itineraries re-fetch fresh URLs via ignavService.bookingLinks().
+  const handleBook = async (link: IgnavProviderLink, itinerary: IgnavItineraryDto) => {
+    if (!link.url) { setBookingSavingError("No booking URL available for this option."); return; }
+    setBookingSaving(true);
+    setBookingSavingError(null);
+    const redirectUrl = link.url; // capture before async save
+    try {
+      const legsJson = itinerary.legs && itinerary.legs.length > 0 ? JSON.stringify(itinerary.legs) : null;
+      await bookingService.create({
+        flightNumber: itinerary.flightNumber ?? "—",
+        origin: itinerary.origin ?? "—",
+        destination: itinerary.destination ?? "—",
+        departureScheduled: itinerary.departureTime ?? null,
+        arrivalScheduled: itinerary.arrivalTime ?? null,
+        airlineName: itinerary.airline ?? null,
+        aircraftRegistration: itinerary.aircraft ?? null,
+        ignavId: itinerary.ignavId,
+        priceAmount: link.priceAmount ?? itinerary.priceAmount ?? null,
+        priceCurrency: link.priceCurrency ?? itinerary.priceCurrency ?? null,
+        priceStatus: link.priceStatus ?? itinerary.priceStatus ?? null,
+        providerName: link.providerName ?? null,
+        providerType: link.providerType ?? null,
+        // bookingUrl intentionally omitted — never trust frontend-submitted URLs
+        cabin: itinerary.cabin ?? null,
+        duration: itinerary.duration ?? null,
+        stops: itinerary.stops ?? null,
+        ignavLegsJson: legsJson,
+      });
+      await loadBookings();
+      await loadHistory(0);
+      window.open(redirectUrl, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      if (e instanceof ApiError) {
+        const body = e.body as { message?: string; details?: string[] } | null;
+        setBookingSavingError("Failed to save booking: " + e.message + (body?.details ? ` — ${body.details.join(" ")}` : ""));
+      } else {
+        setBookingSavingError("Failed to save booking. Please try again.");
+      }
+    } finally {
+      setBookingSaving(false);
+    }
+  };
+
+  // ── AI helpers (from old frontend) — DO NOT MODIFY LOGIC ──
+  const recommendationToDto = (flight: NonNullable<RecommendationResponse["recommended_flight"]>["flight"]): IgnavItineraryDto => ({
+    ignavId: flight.flight_number ?? `ai-${Date.now()}`,
+    airline: flight.airline ?? null,
+    airlineCode: null,
+    flightNumber: flight.flight_number ?? null,
+    origin: flight.origin ?? null,
+    destination: flight.destination ?? null,
+    departureTime: flight.departure_time ?? null,
+    arrivalTime: flight.arrival_time ?? null,
+    duration: null,
+    stops: 0,
+    aircraft: flight.aircraft ?? null,
+    cabin: null,
+    priceAmount: null,
+    priceCurrency: null,
+    priceStatus: null,
+    legs: [],
+    segments: [],
+  });
 
   const handleSelectRecommended = (
     scored: NonNullable<RecommendationResponse["recommended_flight"]> | RecommendationResponse["alternatives"][number],
   ) => {
     const dto = recommendationToDto(scored.flight);
-    openBooking(dto);
+    handleSelectItinerary(dto);
   };
 
   const doAiRecommend = async () => {
     const q = aiQuery.trim();
-    if (!q) {
-      setAiError("Please describe what kind of flight you are looking for.");
-      return;
-    }
+    if (!q) { setAiError("Please describe what kind of flight you are looking for."); return; }
     setAiError(null);
     setAiLoading(true);
     setAiResult(null);
@@ -214,63 +261,16 @@ export function BookingPage() {
 
   const fillAiQueryFromSearch = () => {
     const parts: string[] = [];
-    if (depIata.trim() && arrIata.trim()) {
-      parts.push(`from ${depIata.trim().toUpperCase()} to ${arrIata.trim().toUpperCase()}`);
-    } else if (depIata.trim()) {
-      parts.push(`from ${depIata.trim().toUpperCase()}`);
-    } else if (arrIata.trim()) {
-      parts.push(`to ${arrIata.trim().toUpperCase()}`);
+    if (origin.trim() && destination.trim()) {
+      parts.push(`from ${origin.trim().toUpperCase()} to ${destination.trim().toUpperCase()}`);
+    } else if (origin.trim()) {
+      parts.push(`from ${origin.trim().toUpperCase()}`);
+    } else if (destination.trim()) {
+      parts.push(`to ${destination.trim().toUpperCase()}`);
     }
-    if (flightStatus && flightStatus !== "all") parts.push(`prefer ${flightStatus}`);
     const base = parts.length ? `Find me a flight ${parts.join(" ")}` : "";
     const hint = aiQuery.trim() ? aiQuery : base || "I need a direct evening flight from Delhi to Mumbai";
     setAiQuery(hint);
-  };
-
-  const validateBooking = (): string | null => {
-    if (!bookingForm.flightNumber.trim()) return "flightNumber is required.";
-    if (bookingForm.flightNumber.length > 20) return "flightNumber must be at most 20 characters.";
-    if (!bookingForm.origin.trim()) return "origin is required.";
-    if (!/^[A-Za-z]{3}$/.test(bookingForm.origin)) return "origin must be a 3-letter IATA code.";
-    if (!bookingForm.destination.trim()) return "destination is required.";
-    if (!/^[A-Za-z]{3}$/.test(bookingForm.destination)) return "destination must be a 3-letter IATA code.";
-    if (bookingForm.airlineName && bookingForm.airlineName.length > 100) return "airlineName must be at most 100 characters.";
-    if (bookingForm.aircraftRegistration && bookingForm.aircraftRegistration.length > 50)
-      return "aircraftRegistration must be at most 50 characters.";
-    return null;
-  };
-
-  const handleBookingConfirm = async () => {
-    const v = validateBooking();
-    if (v) {
-      setBookingDialogError(v);
-      return;
-    }
-    setBookingDialogLoading(true);
-    setBookingDialogError(null);
-    setBookingError(null);
-    try {
-      const res = await bookingService.create({
-        flightNumber: bookingForm.flightNumber.trim(),
-        origin: bookingForm.origin.trim().toUpperCase(),
-        destination: bookingForm.destination.trim().toUpperCase(),
-        departureScheduled: bookingForm.departureScheduled || null,
-        arrivalScheduled: bookingForm.arrivalScheduled || null,
-        airlineName: bookingForm.airlineName || null,
-        aircraftRegistration: bookingForm.aircraftRegistration || null,
-      });
-      setBookingSuccess(res);
-      await loadBookings();
-      await loadHistory(0);
-    } catch (e) {
-      if (e instanceof ApiError) {
-        const body = e.body as { message?: string; details?: string[] } | null;
-        setBookingDialogError(e.message + (body?.details ? ` — ${body.details.join(" ")}` : ""));
-        setBookingError(e.message);
-      } else setBookingDialogError("Booking failed.");
-    } finally {
-      setBookingDialogLoading(false);
-    }
   };
 
   const loadHistory = async (p: number) => {
@@ -278,7 +278,6 @@ export function BookingPage() {
     setHistoryError(null);
     try {
       const res: PageResponse<BookingResponse> = await bookingService.listMyBookingsPaginated(p, size);
-      // Cap to 10 most recent — page size is already 10, slice and cap totals
       const cappedContent = res.content.slice(0, 10);
       const cappedTotal = Math.min(res.totalElements, 10);
       setMyBookings(cappedContent);
@@ -306,11 +305,11 @@ export function BookingPage() {
       setSelectedBooking(res);
       setDetailDialogOpen(true);
     } catch (e) {
-      if (e instanceof ApiError) setBookingError(e.message);
+      if (e instanceof ApiError) console.error(e.message);
     }
   };
 
-  // Active Itineraries — only future flights (using current browser time, includes time)
+  // Active Itineraries — only future flights
   const upcomingBookings = bookings.filter((b) => {
     if (!b.departureScheduled) return false;
     const dep = new Date(b.departureScheduled);
@@ -318,80 +317,123 @@ export function BookingPage() {
     return dep.getTime() > Date.now();
   });
 
+  // All providers flattened from booking options
+  const allProviders: (IgnavProviderLink & { _itinerary: IgnavItineraryDto })[] = [];
+  if (selectedItinerary && bookingOptions.length > 0) {
+    for (const opt of bookingOptions) {
+      for (const link of opt.links) {
+        allProviders.push({ ...link, _itinerary: selectedItinerary });
+      }
+    }
+  }
+
   return (
     <div className="w-full min-h-[100dvh] pt-20 pb-24 bg-background">
-      {/* Header — title only, search in left column */}
+      {/* Header */}
       <div className="w-full bg-background border-b border-white/5 py-10 px-6 relative overflow-hidden">
         <div className="absolute inset-0 z-0 bg-gradient-to-tr from-background via-background/90 to-primary/10 flex items-center justify-center opacity-30">
           <Plane className="size-96 text-primary absolute -right-20 -top-20 opacity-20" />
         </div>
         <div className="relative z-10 w-[88%] max-w-[1600px] mx-auto space-y-2">
           <h1 className="text-3xl font-semibold tracking-tight text-white">Flight Search</h1>
-          <p className="text-sm text-muted-foreground">Find and book your next operational route.</p>
+          <p className="text-sm text-muted-foreground">Search flights via Ignav and book through external providers.</p>
         </div>
       </div>
 
       <div className="w-[88%] max-w-[1600px] mx-auto px-6 pt-8 space-y-8">
-        {/* Two-column desktop layout: LEFT 60% independent vertical flow | RIGHT 40% AI */}
+        {/* Two-column: LEFT 60% search/results/active | RIGHT 40% AI */}
         <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-6 items-start">
-          {/* LEFT 60% — Flight Search + Flight Results + Active Itineraries + My Bookings (independent from AI) */}
+          {/* LEFT 60% */}
           <div className="space-y-6 min-w-0">
-            {/* Flight Search — RESTORED to old fields, dark styling */}
+            {/* ── Ignav Search Form ── */}
             <div className="glass-panel-heavy rounded-xl p-4 shadow-xl space-y-4">
               <div className="space-y-1">
                 <h2 className="text-xs uppercase tracking-widest font-semibold text-white flex items-center gap-2">
-                  <Search className="size-3.5 text-primary" /> Find flights to book
+                  <Search className="size-3.5 text-primary" /> Search flights to book
                 </h2>
-                <p className="text-[11px] text-muted-foreground">Same flight search as Tracking · Filter by IATA, airline, status.</p>
+                <p className="text-[11px] text-muted-foreground">Powered by Ignav · Prices and availability from external providers.</p>
               </div>
               <form onSubmit={handleSearch} className="space-y-3">
-                <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                   <div className="space-y-1">
-                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Flight IATA</Label>
-                    <Input placeholder="LH400" value={flightIata} onChange={(e) => setFlightIata(e.target.value)} className="h-9 bg-white/5 border-white/10 font-mono text-sm" />
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Origin IATA *</Label>
+                    <Input placeholder="MAA" maxLength={3} value={origin} onChange={(e) => setOrigin(e.target.value.toUpperCase())} className="h-9 bg-white/5 border-white/10 font-mono text-sm uppercase" required />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Departure IATA</Label>
-                    <Input placeholder="BOM" maxLength={3} value={depIata} onChange={(e) => setDepIata(e.target.value.toUpperCase())} className="h-9 bg-white/5 border-white/10 font-mono text-sm uppercase" />
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Destination IATA *</Label>
+                    <Input placeholder="BLR" maxLength={3} value={destination} onChange={(e) => setDestination(e.target.value.toUpperCase())} className="h-9 bg-white/5 border-white/10 font-mono text-sm uppercase" required />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Arrival IATA</Label>
-                    <Input placeholder="GAU" maxLength={3} value={arrIata} onChange={(e) => setArrIata(e.target.value.toUpperCase())} className="h-9 bg-white/5 border-white/10 font-mono text-sm uppercase" />
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Departure date *</Label>
+                    <Input type="date" value={departureDate} onChange={(e) => setDepartureDate(e.target.value)} className="h-9 bg-white/5 border-white/10 font-mono text-sm" required />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Airline IATA</Label>
-                    <Input placeholder="LH" value={airlineIata} onChange={(e) => setAirlineIata(e.target.value.toUpperCase())} className="h-9 bg-white/5 border-white/10 font-mono text-sm uppercase" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Status</Label>
-                    <Select value={flightStatus || "all"} onValueChange={(v) => setFlightStatus((v as string) || "")}>
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Trip type</Label>
+                    <Select value={tripType} onValueChange={setTripType}>
                       <SelectTrigger className="h-9 bg-white/5 border-white/10 font-mono text-sm">
-                        <SelectValue placeholder="Any" />
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">Any</SelectItem>
-                        <SelectItem value="scheduled">Scheduled</SelectItem>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="landed">Landed</SelectItem>
-                        <SelectItem value="cancelled">Cancelled</SelectItem>
+                        <SelectItem value="ONE_WAY">One-way</SelectItem>
+                        <SelectItem value="ROUND_TRIP">Round-trip</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Limit</Label>
-                    <Select value={limit} onValueChange={(v) => setLimit((v as string) ?? "10")}>
-                      <SelectTrigger className="w-[90px] h-9 bg-white/5 border-white/10 font-mono text-sm">
+                {tripType === "ROUND_TRIP" && (
+                  <div className="grid gap-3 grid-cols-1 sm:grid-cols-4">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Return date *</Label>
+                      <Input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} className="h-9 bg-white/5 border-white/10 font-mono text-sm" required />
+                    </div>
+                  </div>
+                )}
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-4">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Adults</Label>
+                    <Select value={adults} onValueChange={setAdults}>
+                      <SelectTrigger className="h-9 bg-white/5 border-white/10 font-mono text-sm">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="10">10</SelectItem>
-                        <SelectItem value="25">25</SelectItem>
-                        <SelectItem value="50">50</SelectItem>
+                        {[1,2,3,4,5,6,7,8,9].map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Cabin class</Label>
+                    <Select value={cabin} onValueChange={setCabin}>
+                      <SelectTrigger className="h-9 bg-white/5 border-white/10 font-mono text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="economy">Economy</SelectItem>
+                        <SelectItem value="premium_economy">Premium Economy</SelectItem>
+                        <SelectItem value="business">Business</SelectItem>
+                        <SelectItem value="first">First</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Max stops</Label>
+                    <Select value={maxStops} onValueChange={setMaxStops}>
+                      <SelectTrigger className="h-9 bg-white/5 border-white/10 font-mono text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="any">Any</SelectItem>
+                        <SelectItem value="0">Non-stop</SelectItem>
+                        <SelectItem value="1">1 stop</SelectItem>
+                        <SelectItem value="2">2 stops</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Market</Label>
+                    <Input placeholder="IN" maxLength={2} value={market} onChange={(e) => setMarket(e.target.value.toUpperCase())} className="h-9 bg-white/5 border-white/10 font-mono text-sm uppercase" />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
                   <Button type="submit" disabled={searchLoading} className="gap-2 h-9 uppercase tracking-wider text-xs font-semibold">
                     {searchLoading ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />} Search
                   </Button>
@@ -403,27 +445,29 @@ export function BookingPage() {
                   <p className="text-xs text-destructive">{searchError}</p>
                 </div>
               )}
-              {bookingError && (
+              {bookingSavingError && (
                 <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex gap-2">
                   <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
-                  <p className="text-xs text-destructive">{bookingError}</p>
+                  <p className="text-xs text-destructive">{bookingSavingError}</p>
                 </div>
               )}
             </div>
 
-            {/* Flight Results — RESTORED, stays with Search on left */}
+            {/* ── Flight Results ── */}
             <div className="glass-panel rounded-xl p-6 space-y-4">
               <div className="space-y-1">
                 <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
                   <Search className="size-4 text-primary" /> Flight results
                 </h2>
-                <p className="text-xs text-muted-foreground">{searchResults ? `${searchResults.length} flights` : "Search to see bookable flights."}</p>
+                <p className="text-xs text-muted-foreground">
+                  {searchResults ? `${searchResults.length} itineraries found` : "Search to see bookable flights."}
+                </p>
               </div>
 
               {searchLoading && (
                 <div className="space-y-2">
                   {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-20 w-full rounded-lg bg-white/5 animate-pulse" />
+                    <div key={i} className="h-24 w-full rounded-lg bg-white/5 animate-pulse" />
                   ))}
                 </div>
               )}
@@ -433,36 +477,59 @@ export function BookingPage() {
                   <AlertCircle className="size-4 text-muted-foreground shrink-0 mt-0.5" />
                   <div className="space-y-1">
                     <p className="text-xs font-semibold text-white">No flights found</p>
-                    <p className="text-xs text-muted-foreground">No matching flights.</p>
+                    <p className="text-xs text-muted-foreground">Try different dates or airports.</p>
                   </div>
                 </div>
               )}
 
               {searchResults && searchResults.length > 0 && (
                 <div className="space-y-2">
-                  {searchResults.map((f) => {
-                    const key = f.flightNumber ?? f.flightIata ?? Math.random().toString();
+                  {searchResults.map((it) => {
+                    const isSelected = selectedItinerary?.ignavId === it.ignavId;
                     return (
-                      <div key={key} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white/[0.06] transition-colors">
+                      <div
+                        key={it.ignavId}
+                        className={`rounded-xl border p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
+                          isSelected ? "border-primary/40 bg-primary/[0.06]" : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"
+                        }`}
+                      >
                         <div className="space-y-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono text-sm font-semibold text-white">{f.flightIata ?? f.flightNumber ?? "—"}</span>
-                            <Badge variant="outline" className="text-[10px] border-white/15 text-white">
-                              {f.status ?? "—"}
-                            </Badge>
-                          </div>
-                          <div className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
-                            <Building2 className="size-3" />
-                            {f.airlineName ?? f.airlineIata ?? "—"} • <Plane className="size-3" />
-                            {f.aircraftRegistration ?? "—"}
+                            <span className="font-mono text-sm font-semibold text-white">{it.flightNumber ?? "—"}</span>
+                            {it.airline && <span className="text-xs text-muted-foreground">{it.airline}</span>}
+                            {it.stops !== null && (
+                              <Badge variant="outline" className="text-[10px] border-white/15 text-white">
+                                {it.stops === 0 ? "Non-stop" : `${it.stops} stop${it.stops > 1 ? "s" : ""}`}
+                              </Badge>
+                            )}
                           </div>
                           <div className="text-xs text-white">
-                            {f.departureIata ?? "—"} → {f.arrivalIata ?? "—"}{" "}
-                            <span className="text-muted-foreground">{f.departureScheduled ? format(new Date(f.departureScheduled), "MMM dd, HH:mm") : ""}</span>
+                            {it.origin ?? "—"} → {it.destination ?? "—"}{" "}
+                            {it.departureTime && (
+                              <span className="text-muted-foreground">
+                                {format(new Date(it.departureTime), "MMM dd, HH:mm")}
+                              </span>
+                            )}
+                            {it.duration && <span className="text-muted-foreground ml-2">({it.duration})</span>}
                           </div>
+                          <div className="text-xs text-muted-foreground">
+                            {it.aircraft && <span>✈ {it.aircraft}</span>}
+                            {it.cabin && <span className="ml-2">· {it.cabin}</span>}
+                          </div>
+                          {it.priceAmount !== null && (
+                            <div className="text-xs font-semibold text-primary">
+                              {it.priceCurrency ?? ""} {it.priceAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                            </div>
+                          )}
                         </div>
-                        <Button size="sm" onClick={() => openBooking(f)} className="gap-1.5 shrink-0 uppercase tracking-wider text-xs">
-                          <Ticket className="size-4" /> Book
+                        <Button
+                          size="sm"
+                          onClick={() => handleSelectItinerary(it)}
+                          disabled={bookingLinksLoading && isSelected}
+                          className={`gap-1.5 shrink-0 uppercase tracking-wider text-xs ${isSelected ? "bg-primary text-primary-foreground" : ""}`}
+                        >
+                          {bookingLinksLoading && isSelected ? <Loader2 className="size-4 animate-spin" /> : <Ticket className="size-4" />}
+                          {isSelected ? "Loading links…" : "Select"}
                         </Button>
                       </div>
                     );
@@ -471,176 +538,268 @@ export function BookingPage() {
               )}
 
               {!searchResults && !searchLoading && !searchError && (
-                <p className="text-xs text-muted-foreground">Use search above.</p>
+                <p className="text-xs text-muted-foreground">Enter origin, destination, and date to search.</p>
               )}
             </div>
 
-            {/* Active Itineraries — FUTURE ONLY (independent from AI) */}
-{/* Active Itineraries — PRESERVED */}
-          <div className="space-y-4">
-            <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
-              <Ticket className="size-4 text-primary" /> Active Itineraries
-            </h2>
-
-            {loading ? (
-              <div className="flex justify-center py-12">
-                <Loader2 className="size-8 animate-spin text-primary" />
-              </div>
-            ) : upcomingBookings.length === 0 ? (
-              <div className="glass-panel rounded-xl p-12 text-center flex flex-col items-center justify-center space-y-4">
-                <Ticket className="size-12 text-white/10" />
-                <p className="font-mono text-sm text-muted-foreground">No upcoming flights</p>
-              </div>
-            ) : (
-              <div className="grid gap-4">
-                {upcomingBookings.map((booking) => (
-                  <div key={booking.id} className="glass-panel rounded-xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 hover:border-primary/30 transition-colors">
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-3">
-                        <span className="px-2 py-0.5 rounded bg-primary/20 text-primary text-[10px] uppercase tracking-widest font-mono font-bold">
-                          {booking.status}
-                        </span>
-                        <span className="font-mono text-xs text-muted-foreground">REF: {booking.id}</span>
-                      </div>
-
-                      <div className="flex items-center gap-6">
-                        <div className="space-y-1">
-                          <p className="text-3xl font-mono text-white">{booking.origin ?? "—"}</p>
-                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                            {booking.departureScheduled ? format(new Date(booking.departureScheduled), "MMM dd, HH:mm") : "—"}
-                          </p>
-                        </div>
-                        <div className="flex flex-col items-center gap-1 opacity-50 px-4">
-                          <ArrowRight className="size-4" />
-                        </div>
-                        <div className="space-y-1 text-right">
-                          <p className="text-3xl font-mono text-white">{booking.destination ?? "—"}</p>
-                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                            {booking.arrivalScheduled ? format(new Date(booking.arrivalScheduled), "MMM dd, HH:mm") : "—"}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col items-end gap-4 w-full md:w-auto border-t md:border-t-0 md:border-l border-white/5 pt-4 md:pt-0 md:pl-6">
-                      <div className="text-right">
-                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Airline</p>
-                        <p className="text-lg font-mono text-white">{booking.airlineName || "Unknown"}</p>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-xs uppercase tracking-wider font-semibold border-white/10 bg-white/[0.03]"
-                        onClick={() => navigate(`/tracking?flight_iata=${booking.flightNumber}`)}
-                      >
-                        View Flight
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* My bookings — PRESERVED */}
-          <div className="glass-panel rounded-xl p-6 space-y-4">
-            <div className="flex flex-row items-center justify-between gap-4">
-              <div className="space-y-1">
-                <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
-                  <Calendar className="size-4 text-primary" /> My bookings
-                </h2>
-                <p className="text-xs text-muted-foreground">Your booking history. Refresh to sync with server.</p>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => loadHistory(page)} disabled={loadingHistory} className="gap-1.5 border-white/10 bg-white/[0.03] text-xs">
-                <RefreshCw className={`size-4 ${loadingHistory ? "animate-spin" : ""}`} /> Refresh
-              </Button>
-            </div>
-
-            {loadingHistory && (
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-12 w-full rounded-lg bg-white/5 animate-pulse" />
-                ))}
-              </div>
-            )}
-
-            {historyError && (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex gap-2">
-                <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
-                <p className="text-xs text-destructive">{historyError}</p>
-              </div>
-            )}
-
-            {!loadingHistory && myBookings && myBookings.length === 0 && (
-              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-6 flex flex-col items-center gap-2 text-center">
-                <Ticket className="size-8 text-white/10" />
-                <p className="text-xs font-semibold text-white">No bookings yet</p>
-                <p className="text-xs text-muted-foreground">Search and book a flight to see it here.</p>
-              </div>
-            )}
-
-            {myBookings && myBookings.length > 0 && (
-              <>
-                <div className="rounded-xl border border-white/10 overflow-hidden bg-white/[0.02]">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="border-white/10 hover:bg-transparent">
-                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Flight</TableHead>
-                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Route</TableHead>
-                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Status</TableHead>
-                          <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Created</TableHead>
-                          <TableHead className="text-xs"></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {myBookings.map((b) => (
-                          <TableRow key={b.id} className="border-white/5 hover:bg-white/[0.04]">
-                            <TableCell className="font-mono text-xs text-white">{b.flightNumber}</TableCell>
-                            <TableCell className="text-xs text-white">
-                              {b.origin} → {b.destination}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="secondary" className="text-[10px] bg-white/10 text-white border-white/10">
-                                {b.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">{new Date(b.createdAt).toLocaleDateString()}</TableCell>
-                            <TableCell>
-                              <Button variant="ghost" size="sm" className="h-7 text-xs hover:bg-white/10" onClick={() => loadBookingDetail(b.id)}>
-                                View
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+            {/* ── Booking Links Panel ── */}
+            {selectedItinerary && (
+              <div className="glass-panel rounded-xl p-6 space-y-4 border border-primary/20">
+                <div className="space-y-1">
+                  <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
+                    <ExternalLink className="size-4 text-primary" /> Booking options
+                  </h2>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedItinerary.flightNumber} · {selectedItinerary.origin} → {selectedItinerary.destination}
+                    {selectedItinerary.departureTime && ` · ${format(new Date(selectedItinerary.departureTime), "MMM dd, HH:mm")}`}
+                  </p>
                 </div>
 
-                {pageInfo && pageInfo.totalPages > 1 && (
-                  <Pagination className="justify-center">
-                    <PaginationContent>
-                      <PaginationItem>
-                        <PaginationPrevious href="#" onClick={(e) => { e.preventDefault(); if (page > 0) loadHistory(page - 1); }} className={page === 0 ? "pointer-events-none opacity-50" : "hover:bg-white/10"} />
-                      </PaginationItem>
-                      {Array.from({ length: Math.min(pageInfo.totalPages, 5) }).map((_, i) => (
-                        <PaginationItem key={i}>
-                          <PaginationLink href="#" isActive={i === page} onClick={(e) => { e.preventDefault(); loadHistory(i); }} className="hover:bg-white/10 data-[active=true]:bg-primary data-[active=true]:text-primary-foreground">
-                            {i + 1}
-                          </PaginationLink>
-                        </PaginationItem>
-                      ))}
-                      <PaginationItem>
-                        <PaginationNext href="#" onClick={(e) => { e.preventDefault(); if (page < pageInfo.totalPages - 1) loadHistory(page + 1); }} className={page >= pageInfo.totalPages - 1 ? "pointer-events-none opacity-50" : "hover:bg-white/10"} />
-                      </PaginationItem>
-                    </PaginationContent>
-                  </Pagination>
+                {bookingLinksLoading && (
+                  <div className="space-y-2">
+                    {[1, 2].map((i) => (
+                      <div key={i} className="h-16 w-full rounded-lg bg-white/5 animate-pulse" />
+                    ))}
+                  </div>
                 )}
-                {pageInfo && <p className="text-xs text-center text-muted-foreground">Page {pageInfo.page + 1} of {pageInfo.totalPages} • {pageInfo.totalElements} total</p>}
-              </>
+
+                {bookingLinksError && (
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex gap-2">
+                    <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+                    <p className="text-xs text-destructive">{bookingLinksError}</p>
+                  </div>
+                )}
+
+                {!bookingLinksLoading && !bookingLinksError && bookingOptions.length === 0 && (
+                  <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 flex gap-3">
+                    <Info className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                    <p className="text-xs text-muted-foreground">Booking links are currently unavailable for this flight.</p>
+                  </div>
+                )}
+
+                {!bookingLinksLoading && !bookingLinksError && allProviders.length > 0 && (
+                  <div className="space-y-2">
+                    {allProviders.map((link, idx) => (
+                      <div key={idx} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-0.5 min-w-0">
+                          <p className="text-sm font-semibold text-white">{link.providerName ?? "Provider"}</p>
+                          <div className="text-xs text-muted-foreground">
+                            {link.priceAmount !== null && (
+                              <span className="text-primary font-semibold">
+                                {link.priceCurrency ?? ""} {link.priceAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                              </span>
+                            )}
+                            {link.providerType && <span className="ml-2">· {link.providerType}</span>}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => handleBook(link, selectedItinerary)}
+                          disabled={bookingSaving}
+                          className="gap-1.5 shrink-0 uppercase tracking-wider text-xs"
+                        >
+                          {bookingSaving ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
+                          {bookingSaving ? "Preparing…" : "Book"}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
-          </div>
+
+            {/* ── Active Itineraries — FUTURE ONLY ── */}
+            <div className="space-y-4">
+              <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
+                <Ticket className="size-4 text-primary" /> Active Itineraries
+              </h2>
+
+              {loading ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="size-8 animate-spin text-primary" />
+                </div>
+              ) : upcomingBookings.length === 0 ? (
+                <div className="glass-panel rounded-xl p-12 text-center flex flex-col items-center justify-center space-y-4">
+                  <Ticket className="size-12 text-white/10" />
+                  <p className="font-mono text-sm text-muted-foreground">No upcoming flights</p>
+                </div>
+              ) : (
+                <div className="grid gap-4">
+                  {upcomingBookings.map((booking) => (
+                    <div key={booking.id} className="glass-panel rounded-xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 hover:border-primary/30 transition-colors">
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-3">
+                          <span className="px-2 py-0.5 rounded bg-primary/20 text-primary text-[10px] uppercase tracking-widest font-mono font-bold">
+                            {booking.status}
+                          </span>
+                          <span className="font-mono text-xs text-muted-foreground">REF: {booking.id}</span>
+                          {booking.providerName && <span className="text-xs text-muted-foreground">via {booking.providerName}</span>}
+                        </div>
+                        <div className="flex items-center gap-6">
+                          <div className="space-y-1">
+                            <p className="text-3xl font-mono text-white">{booking.origin ?? "—"}</p>
+                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                              {booking.departureScheduled ? format(new Date(booking.departureScheduled), "MMM dd, HH:mm") : "—"}
+                            </p>
+                          </div>
+                          <div className="flex flex-col items-center gap-1 opacity-50 px-4">
+                            <ArrowRight className="size-4" />
+                          </div>
+                          <div className="space-y-1 text-right">
+                            <p className="text-3xl font-mono text-white">{booking.destination ?? "—"}</p>
+                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                              {booking.arrivalScheduled ? format(new Date(booking.arrivalScheduled), "MMM dd, HH:mm") : "—"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-4 w-full md:w-auto border-t md:border-t-0 md:border-l border-white/5 pt-4 md:pt-0 md:pl-6">
+                        <div className="text-right">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Airline</p>
+                          <p className="text-lg font-mono text-white">{booking.airlineName || "Unknown"}</p>
+                          {booking.priceAmount !== null && (
+                            <p className="text-xs text-primary font-semibold">
+                              {booking.priceCurrency ?? ""} {booking.priceAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          {booking.ignavId && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-xs uppercase tracking-wider font-semibold border-white/10 bg-white/[0.03]"
+                              onClick={async () => {
+                                try {
+                                  const res = await ignavService.bookingLinks({ ignavId: booking.ignavId! });
+                                  const firstUrl = res.bookingOptions?.flatMap(o => o.links).find(l => l.url)?.url;
+                                  if (firstUrl) window.open(firstUrl, "_blank", "noopener,noreferrer");
+                                  else alert("Booking links are currently unavailable for this flight.");
+                                } catch {
+                                  alert("Failed to fetch booking link. Please try again later.");
+                                }
+                              }}
+                            >
+                              <ExternalLink className="size-3 mr-1" /> Open booking
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs uppercase tracking-wider font-semibold border-white/10 bg-white/[0.03]"
+                            onClick={() => navigate(`/tracking?flight_iata=${booking.flightNumber}`)}
+                          >
+                            View Flight
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ── My bookings ── */}
+            <div className="glass-panel rounded-xl p-6 space-y-4">
+              <div className="flex flex-row items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
+                    <Calendar className="size-4 text-primary" /> My bookings
+                  </h2>
+                  <p className="text-xs text-muted-foreground">Your booking history. Refresh to sync with server.</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => loadHistory(page)} disabled={loadingHistory} className="gap-1.5 border-white/10 bg-white/[0.03] text-xs">
+                  <RefreshCw className={`size-4 ${loadingHistory ? "animate-spin" : ""}`} /> Refresh
+                </Button>
+              </div>
+
+              {loadingHistory && (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-12 w-full rounded-lg bg-white/5 animate-pulse" />
+                  ))}
+                </div>
+              )}
+
+              {historyError && (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex gap-2">
+                  <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+                  <p className="text-xs text-destructive">{historyError}</p>
+                </div>
+              )}
+
+              {!loadingHistory && myBookings && myBookings.length === 0 && (
+                <div className="rounded-lg border border-white/10 bg-white/[0.03] p-6 flex flex-col items-center gap-2 text-center">
+                  <Ticket className="size-8 text-white/10" />
+                  <p className="text-xs font-semibold text-white">No bookings yet</p>
+                  <p className="text-xs text-muted-foreground">Search and book a flight to see it here.</p>
+                </div>
+              )}
+
+              {myBookings && myBookings.length > 0 && (
+                <>
+                  <div className="rounded-xl border border-white/10 overflow-hidden bg-white/[0.02]">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-white/10 hover:bg-transparent">
+                            <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Flight</TableHead>
+                            <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Route</TableHead>
+                            <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Provider</TableHead>
+                            <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Status</TableHead>
+                            <TableHead className="text-xs text-muted-foreground uppercase tracking-wider">Created</TableHead>
+                            <TableHead className="text-xs"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {myBookings.map((b) => (
+                            <TableRow key={b.id} className="border-white/5 hover:bg-white/[0.04]">
+                              <TableCell className="font-mono text-xs text-white">{b.flightNumber}</TableCell>
+                              <TableCell className="text-xs text-white">
+                                {b.origin} → {b.destination}
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">{b.providerName ?? "—"}</TableCell>
+                              <TableCell>
+                                <Badge variant="secondary" className="text-[10px] bg-white/10 text-white border-white/10">
+                                  {b.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">{new Date(b.createdAt).toLocaleDateString()}</TableCell>
+                              <TableCell>
+                                <Button variant="ghost" size="sm" className="h-7 text-xs hover:bg-white/10" onClick={() => loadBookingDetail(b.id)}>
+                                  View
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+
+                  {pageInfo && pageInfo.totalPages > 1 && (
+                    <Pagination className="justify-center">
+                      <PaginationContent>
+                        <PaginationItem>
+                          <PaginationPrevious href="#" onClick={(e) => { e.preventDefault(); if (page > 0) loadHistory(page - 1); }} className={page === 0 ? "pointer-events-none opacity-50" : "hover:bg-white/10"} />
+                        </PaginationItem>
+                        {Array.from({ length: Math.min(pageInfo.totalPages, 5) }).map((_, i) => (
+                          <PaginationItem key={i}>
+                            <PaginationLink href="#" isActive={i === page} onClick={(e) => { e.preventDefault(); loadHistory(i); }} className="hover:bg-white/10 data-[active=true]:bg-primary data-[active=true]:text-primary-foreground">
+                              {i + 1}
+                            </PaginationLink>
+                          </PaginationItem>
+                        ))}
+                        <PaginationItem>
+                          <PaginationNext href="#" onClick={(e) => { e.preventDefault(); if (page < pageInfo.totalPages - 1) loadHistory(page + 1); }} className={page >= pageInfo.totalPages - 1 ? "pointer-events-none opacity-50" : "hover:bg-white/10"} />
+                        </PaginationItem>
+                      </PaginationContent>
+                    </Pagination>
+                  )}
+                  {pageInfo && <p className="text-xs text-center text-muted-foreground">Page {pageInfo.page + 1} of {pageInfo.totalPages} · {pageInfo.totalElements} total</p>}
+                </>
+              )}
+            </div>
           </div>
 
           {/* RIGHT 40% — AI Flight Recommendation (logic unchanged, only repositioned) */}
@@ -812,94 +971,7 @@ export function BookingPage() {
           </div>
         </div>
 
-        {/* Booking dialog — RESTORED */}
-        <Dialog open={!!bookingFlight} onOpenChange={(open) => {
-          if (!open) {
-            setBookingFlight(null);
-            setBookingSuccess(null);
-            setBookingDialogError(null);
-          }
-        }}>
-          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto bg-card border-white/10">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-white">
-                <Ticket className="size-5 text-primary" /> Confirm booking
-              </DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">
-                Booking will be created via <code className="bg-white/10 px-1 rounded">POST /api/bookings</code>. No payment required.
-              </DialogDescription>
-            </DialogHeader>
-            {bookingFlight && (
-              <div className="space-y-4">
-                <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3 text-xs space-y-1">
-                  <div className="font-semibold text-white">
-                    {bookingFlight.flightIata ?? bookingFlight.flightNumber} — {bookingFlight.airlineName ?? bookingFlight.airlineIata}
-                  </div>
-                  <div className="text-muted-foreground">
-                    {bookingFlight.departureIata} → {bookingFlight.arrivalIata} • {bookingFlight.departureScheduled ?? ""}
-                  </div>
-                </div>
-
-                {!bookingSuccess ? (
-                  <div className="space-y-3">
-                    <div className="grid gap-3">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Flight number *</Label>
-                        <Input value={bookingForm.flightNumber} onChange={(e) => setBookingForm((s) => ({ ...s, flightNumber: e.target.value }))} maxLength={20} className="bg-white/5 border-white/10" />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">Origin IATA *</Label>
-                          <Input value={bookingForm.origin} onChange={(e) => setBookingForm((s) => ({ ...s, origin: e.target.value.toUpperCase() }))} maxLength={3} className="bg-white/5 border-white/10 font-mono uppercase" />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">Destination IATA *</Label>
-                          <Input value={bookingForm.destination} onChange={(e) => setBookingForm((s) => ({ ...s, destination: e.target.value.toUpperCase() }))} maxLength={3} className="bg-white/5 border-white/10 font-mono uppercase" />
-                        </div>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Departure scheduled</Label>
-                        <Input placeholder="e.g., 2025-09-03T10:00:00Z" value={bookingForm.departureScheduled} onChange={(e) => setBookingForm((s) => ({ ...s, departureScheduled: e.target.value }))} maxLength={50} className="bg-white/5 border-white/10 font-mono text-xs" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Arrival scheduled</Label>
-                        <Input placeholder="e.g., 2025-09-03T12:30:00Z" value={bookingForm.arrivalScheduled} onChange={(e) => setBookingForm((s) => ({ ...s, arrivalScheduled: e.target.value }))} maxLength={50} className="bg-white/5 border-white/10 font-mono text-xs" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Airline name</Label>
-                        <Input value={bookingForm.airlineName} onChange={(e) => setBookingForm((s) => ({ ...s, airlineName: e.target.value }))} maxLength={100} className="bg-white/5 border-white/10" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Aircraft registration</Label>
-                        <Input value={bookingForm.aircraftRegistration} onChange={(e) => setBookingForm((s) => ({ ...s, aircraftRegistration: e.target.value }))} maxLength={50} className="bg-white/5 border-white/10" />
-                      </div>
-                    </div>
-                    {bookingDialogError && (
-                      <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex gap-2">
-                        <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
-                        <p className="text-xs text-destructive">{bookingDialogError}</p>
-                      </div>
-                    )}
-                    <Button onClick={handleBookingConfirm} disabled={bookingDialogLoading} className="w-full gap-2 uppercase tracking-wider text-xs">
-                      {bookingDialogLoading ? <Loader2 className="size-4 animate-spin" /> : null}
-                      {bookingDialogLoading ? "Booking…" : "Confirm booking"}
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4 flex gap-3">
-                    <CheckCircle2 className="size-5 text-emerald-400 shrink-0 mt-0.5" />
-                    <div className="space-y-1">
-                      <p className="text-xs font-semibold text-emerald-400">Booking confirmed</p>
-                      <p className="text-xs text-muted-foreground">ID {bookingSuccess.id} • {bookingSuccess.flightNumber} • {bookingSuccess.origin} → {bookingSuccess.destination}</p>
-                      <p className="text-xs text-muted-foreground">Status {bookingSuccess.status} • {new Date(bookingSuccess.createdAt).toLocaleString()}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-
+        {/* Booking detail dialog */}
         <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
           <DialogContent className="bg-card border-white/10">
             <DialogHeader>
@@ -937,6 +1009,36 @@ export function BookingPage() {
                   <span className="text-muted-foreground">Aircraft</span>
                   <span className="text-white">{selectedBooking.aircraftRegistration ?? "—"}</span>
                 </div>
+                {selectedBooking.providerName && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Provider</span>
+                    <span className="text-white">{selectedBooking.providerName}</span>
+                  </div>
+                )}
+                {selectedBooking.priceAmount !== null && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Price</span>
+                    <span className="text-primary font-semibold">{selectedBooking.priceCurrency ?? ""} {selectedBooking.priceAmount?.toLocaleString()}</span>
+                  </div>
+                )}
+                {selectedBooking.cabin && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Cabin</span>
+                    <span className="text-white">{selectedBooking.cabin}</span>
+                  </div>
+                )}
+                {selectedBooking.duration && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Duration</span>
+                    <span className="text-white">{selectedBooking.duration}</span>
+                  </div>
+                )}
+                {selectedBooking.stops !== null && selectedBooking.stops !== undefined && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Stops</span>
+                    <span className="text-white">{selectedBooking.stops === 0 ? "Non-stop" : `${selectedBooking.stops} stop(s)`}</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Status</span>
                   <Badge variant="secondary" className="text-[10px] bg-white/10 text-white border-white/10">
@@ -947,12 +1049,33 @@ export function BookingPage() {
                   <span className="text-muted-foreground">Created</span>
                   <span className="text-white">{new Date(selectedBooking.createdAt).toLocaleString()}</span>
                 </div>
+                {selectedBooking.ignavId && (
+                  <div className="pt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full text-xs border-white/10 bg-white/[0.03]"
+                      onClick={async () => {
+                        try {
+                          const res = await ignavService.bookingLinks({ ignavId: selectedBooking.ignavId! });
+                          const firstUrl = res.bookingOptions?.flatMap(o => o.links).find(l => l.url)?.url;
+                          if (firstUrl) window.open(firstUrl, "_blank", "noopener,noreferrer");
+                          else alert("Booking links are currently unavailable for this flight.");
+                        } catch {
+                          alert("Failed to fetch booking link. Please try again later.");
+                        }
+                      }}
+                    >
+                      <ExternalLink className="size-3 mr-1" /> Open booking page
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </DialogContent>
         </Dialog>
 
-        <p className="text-xs text-muted-foreground text-center">No payments • No cross-user exposure • Backend enforces ownership.</p>
+        <p className="text-xs text-muted-foreground text-center">No payments · No cross-user exposure · Backend enforces ownership.</p>
       </div>
     </div>
   );
