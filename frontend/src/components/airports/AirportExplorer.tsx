@@ -254,7 +254,7 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
 
       {/* Map — enlarged viewport: ~520px on desktop, responsive */}
       <div className="relative flex-1 min-h-[380px] sm:min-h-[450px] lg:min-h-[520px]">
-        <div ref={mapContainerRef} className="h-full w-full" />
+        <div ref={mapContainerRef} className="h-full w-full min-h-[380px] sm:min-h-[450px] lg:min-h-[520px]" />
       </div>
 
       {/* Feature list / detail panel */}
