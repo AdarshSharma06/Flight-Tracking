@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Map as MapLibreMap, Marker, NavigationControl, LngLatBounds, setWorkerUrl } from "maplibre-gl";
-import type { MapMouseEvent, MapGeoJSONFeature, ErrorEvent } from "maplibre-gl";
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore - Vite ?worker&url import
-import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
-import "maplibre-gl/dist/maplibre-gl.css";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import type { AirportExplorerData, GeoFeature } from "@/types/api";
-
-setWorkerUrl(workerUrl as string);
 import { Loader2, AlertCircle, MapPin, PlaneTakeoff, Building2, Car, Coffee, ChevronRight, RotateCcw, Layers, X } from "lucide-react";
 
 interface AirportExplorerProps {
@@ -30,168 +24,80 @@ const CATEGORY_CONFIG: Record<Category, { label: string; icon: React.ReactNode; 
   amenities: { label: "Amenities", icon: <Coffee className="size-3" />, color: "#f472b6" },
 };
 
-function featuresToGeoJSON(features: GeoFeature[]): GeoJSON.FeatureCollection {
-  const out: GeoJSON.Feature[] = [];
-  for (const f of features) {
-    if (f.geometry && f.geometry.length > 0 && f.geometry[0].length > 0) {
-      const coords = f.geometry[0] as unknown as number[][];
-      const lngLatCoords = coords.map((c) => [c[1], c[0]]);
-
-      if (lngLatCoords.length >= 3) {
-        out.push({
-          type: "Feature",
-          properties: { id: f.id, name: f.name, ref: f.ref, category: f.category, ...f.properties },
-          geometry: { type: "Polygon", coordinates: [lngLatCoords] },
-        });
-      } else if (lngLatCoords.length >= 2) {
-        out.push({
-          type: "Feature",
-          properties: { id: f.id, name: f.name, ref: f.ref, category: f.category, ...f.properties },
-          geometry: { type: "LineString", coordinates: lngLatCoords },
-        });
-      }
-    } else {
-      out.push({
-        type: "Feature",
-        properties: { id: f.id, name: f.name, ref: f.ref, category: f.category, ...f.properties },
-        geometry: { type: "Point", coordinates: [f.longitude, f.latitude] },
-      });
-    }
-  }
-  return { type: "FeatureCollection", features: out };
-}
-
 export function AirportExplorer({ data, loading, error, latitude, longitude, iata }: AirportExplorerProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<MapLibreMap | null>(null);
-  const markerRef = useRef<Marker | null>(null);
-  const overlaySourceIdsRef = useRef<string[]>([]);
-  const [mapStatus, setMapStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [mapLoadTicks, setMapLoadTicks] = useState(0);
-  const [mapRetryKey, setMapRetryKey] = useState(0);
+  const mapRef = useRef<L.Map | null>(null);
+  const airportMarkerRef = useRef<L.Marker | null>(null);
+  const overlayGroupRef = useRef<L.LayerGroup | null>(null);
+  const [mapReady, setMapReady] = useState(false);
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
   const [selectedFeature, setSelectedFeature] = useState<GeoFeature | null>(null);
-
-  // Tick every second while map is loading so UI shows elapsed time
-  useEffect(() => {
-    if (mapStatus !== "loading") return;
-    const id = setInterval(() => setMapLoadTicks((t) => t + 1), 1000);
-    return () => clearInterval(id);
-  }, [mapStatus]);
 
   const getCategoryCount = useCallback((cat: Category): number => {
     if (!data) return 0;
     return data[cat]?.length ?? 0;
   }, [data]);
 
-  // Initialize MapLibre map — depends on `loading` so it re-runs when the container becomes available
+  // Initialize Leaflet map — independent of weather, depends only on container existing
   useEffect(() => {
-    // Container doesn't exist while parent API is loading (early return in render)
     if (!mapContainerRef.current) return;
+    if (mapRef.current) return;
 
-    let cancelled = false;
-    let map: MapLibreMap | null = null;
-    let loadTimeout: ReturnType<typeof setTimeout> | null = null;
-    let resizeObserver: ResizeObserver | null = null;
+    const map = L.map(mapContainerRef.current, {
+      center: [latitude, longitude],
+      zoom: 13,
+      zoomControl: true,
+    });
 
-    const onLoad = () => {
-      if (cancelled) return;
-      if (loadTimeout) { clearTimeout(loadTimeout); loadTimeout = null; }
-      mapRef.current = map;
-      markerRef.current = marker;
-      console.log("[AirportExplorer] MapLibre map loaded for", iata);
-      setMapStatus("ready");
-      // Flex container may not have finalized layout at init time — force resize on next frame
-      requestAnimationFrame(() => {
-        if (cancelled || !map) return;
-        map.resize();
-      });
-    };
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
 
-    const onError = (e: ErrorEvent) => {
-      console.error("[AirportExplorer] MapLibre error:", e.error?.message ?? e);
-      if (!cancelled) setMapStatus("error");
-    };
+    const icon = L.divIcon({
+      className: "",
+      html: `<div style="background:#38bdf8;color:#0f172a;border-radius:9999px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:9px;letter-spacing:0.5px;box-shadow:0 0 12px rgba(56,189,248,0.5);border:2px solid #fff;">${iata}</div>`,
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+    });
 
-    const markerEl = document.createElement("div");
-    markerEl.style.cssText = "display:flex;align-items:center;justify-content:center;";
-    markerEl.innerHTML = `<div style="background:#38bdf8;color:#0f172a;border-radius:9999px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:9px;letter-spacing:0.5px;box-shadow:0 0 12px rgba(56,189,248,0.5);border:2px solid #fff;">${iata}</div>`;
+    const marker = L.marker([latitude, longitude], { icon }).addTo(map);
+    marker.bindTooltip(iata, { permanent: false, direction: "top" });
 
-    const marker = new Marker({ element: markerEl })
-      .setLngLat([longitude, latitude]);
+    mapRef.current = map;
+    airportMarkerRef.current = marker;
+    overlayGroupRef.current = L.layerGroup().addTo(map);
+    setMapReady(true);
 
-    try {
-      console.log("[AirportExplorer] Creating MapLibre map for", iata);
-      map = new MapLibreMap({
-        container: mapContainerRef.current,
-        style: "https://tiles.openfreemap.org/styles/liberty",
-        center: [longitude, latitude],
-        zoom: 13,
-        pitchWithRotate: false,
-        dragRotate: false,
-        touchZoomRotate: false,
-        maxPitch: 0,
-      });
-
-      map.addControl(new NavigationControl({ showCompass: false }), "top-right");
-      marker.addTo(map);
-
-      map.on("load", onLoad);
-      map.on("error", onError);
-
-      // Keep MapLibre in sync with flex layout changes (container starts as flex-1 + min-h)
-      if (mapContainerRef.current) {
-        resizeObserver = new ResizeObserver(() => {
-          if (!cancelled) map?.resize();
-        });
-        resizeObserver.observe(mapContainerRef.current);
-      }
-
-      // Safety timeout: if map never fires "load" within 15s, show error
-      loadTimeout = setTimeout(() => {
-        if (cancelled) return;
-        if (mapRef.current) return;
-        console.warn("[AirportExplorer] MapLibre load timed out after 15s");
-        setMapStatus("error");
-      }, 15000);
-    } catch (err) {
-      console.error("[AirportExplorer] MapLibre init failed:", err);
-      if (!cancelled) setMapStatus("error");
-    }
+    // Keep Leaflet in sync with flex layout
+    const ro = new ResizeObserver(() => map.invalidateSize());
+    ro.observe(mapContainerRef.current);
+    // Initial invalidate after layout settles
+    requestAnimationFrame(() => map.invalidateSize());
 
     return () => {
-      cancelled = true;
-      if (loadTimeout) clearTimeout(loadTimeout);
-      resizeObserver?.disconnect();
-      marker.remove();
-      map?.remove();
+      ro.disconnect();
+      map.remove();
       mapRef.current = null;
-      markerRef.current = null;
+      airportMarkerRef.current = null;
+      overlayGroupRef.current = null;
+      setMapReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, mapRetryKey]);
+  }, [loading]);
 
   // Re-center when coordinates change
   useEffect(() => {
-    if (mapStatus !== "ready" || !mapRef.current) return;
-    mapRef.current.flyTo({ center: [longitude, latitude], zoom: 13, duration: 500 });
-    markerRef.current?.setLngLat([longitude, latitude]);
-  }, [latitude, longitude, mapStatus]);
+    if (!mapReady || !mapRef.current) return;
+    mapRef.current.setView([latitude, longitude], 13);
+    airportMarkerRef.current?.setLatLng([latitude, longitude]);
+  }, [latitude, longitude, mapReady]);
 
-  // Show category overlays on map
+  // Show category overlays
   useEffect(() => {
-    if (mapStatus !== "ready" || !mapRef.current || !data) return;
-    const map = mapRef.current;
-
-    // Clear previous overlays
-    for (const sid of overlaySourceIdsRef.current) {
-      if (map.getLayer(`overlay-fill-${sid}`)) map.removeLayer(`overlay-fill-${sid}`);
-      if (map.getLayer(`overlay-outline-${sid}`)) map.removeLayer(`overlay-outline-${sid}`);
-      if (map.getLayer(`overlay-line-${sid}`)) map.removeLayer(`overlay-line-${sid}`);
-      if (map.getLayer(`overlay-point-${sid}`)) map.removeLayer(`overlay-point-${sid}`);
-      if (map.getSource(sid)) map.removeSource(sid);
-    }
-    overlaySourceIdsRef.current = [];
+    if (!mapReady || !mapRef.current || !overlayGroupRef.current || !data) return;
+    const group = overlayGroupRef.current;
+    group.clearLayers();
 
     if (!activeCategory) return;
 
@@ -199,154 +105,73 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     if (features.length === 0) return;
 
     const config = CATEGORY_CONFIG[activeCategory];
-    const geojson = featuresToGeoJSON(features);
-    const sourceId = `overlay-${activeCategory}`;
+    const boundsPoints: L.LatLngExpression[] = [];
 
-    map.addSource(sourceId, { type: "geojson", data: geojson });
-    overlaySourceIdsRef.current.push(sourceId);
-
-    const hasPolygons = geojson.features.some((f) => f.geometry.type === "Polygon");
-    const hasLines = geojson.features.some((f) => f.geometry.type === "LineString");
-    const hasPoints = geojson.features.some((f) => f.geometry.type === "Point");
-
-    if (hasPolygons) {
-      map.addLayer({
-        id: `overlay-fill-${sourceId}`,
-        type: "fill",
-        source: sourceId,
-        filter: ["==", "$type", "Polygon"],
-        paint: { "fill-color": config.color, "fill-opacity": 0.15 },
-      });
-      map.addLayer({
-        id: `overlay-outline-${sourceId}`,
-        type: "line",
-        source: sourceId,
-        filter: ["==", "$type", "Polygon"],
-        paint: { "line-color": config.color, "line-width": 2, "line-opacity": 0.8 },
-      });
-    }
-
-    if (hasLines) {
-      map.addLayer({
-        id: `overlay-line-${sourceId}`,
-        type: "line",
-        source: sourceId,
-        filter: ["==", "$type", "LineString"],
-        paint: {
-          "line-color": config.color,
-          "line-width": activeCategory === "runways" ? 4 : 2,
-          "line-opacity": 0.9,
-        },
-      });
-    }
-
-    if (hasPoints) {
-      map.addLayer({
-        id: `overlay-point-${sourceId}`,
-        type: "circle",
-        source: sourceId,
-        filter: ["==", "$type", "Point"],
-        paint: {
-          "circle-radius": 5,
-          "circle-color": config.color,
-          "circle-stroke-color": "#fff",
-          "circle-stroke-width": 1,
-          "circle-opacity": 0.8,
-        },
-      });
-    }
-
-    // Fit bounds to features
-    const bounds = new LngLatBounds();
-    let hasBounds = false;
     for (const f of features) {
-      if (f.geometry?.[0]?.length) {
-        for (const c of f.geometry[0]) {
-          bounds.extend([c[1], c[0]]);
-          hasBounds = true;
+      const onClick = () => setSelectedFeature(f);
+
+      if (f.geometry && f.geometry.length > 0 && f.geometry[0].length > 0) {
+        // Backend geometry is [lat, lng] — Leaflet expects [lat, lng]
+        const latLngs = (f.geometry[0] as unknown as number[][]).map(
+          (c) => [c[0], c[1]] as L.LatLngExpression,
+        );
+        for (const ll of latLngs) boundsPoints.push(ll);
+
+        if (latLngs.length >= 3) {
+          L.polygon(latLngs as L.LatLngExpression[], {
+            color: config.color,
+            weight: 2,
+            opacity: 0.8,
+            fillColor: config.color,
+            fillOpacity: 0.15,
+          })
+            .on("click", onClick)
+            .addTo(group);
+        } else if (latLngs.length >= 2) {
+          L.polyline(latLngs as L.LatLngExpression[], {
+            color: config.color,
+            weight: activeCategory === "runways" ? 4 : 2,
+            opacity: 0.9,
+          })
+            .on("click", onClick)
+            .addTo(group);
         }
       } else {
-        bounds.extend([f.longitude, f.latitude]);
-        hasBounds = true;
-      }
-    }
-    if (hasBounds) {
-      map.fitBounds(bounds, { padding: 40, maxZoom: 16 });
-    }
-  }, [activeCategory, data, mapStatus]);
-
-  // Click interaction on overlay features
-  useEffect(() => {
-    if (mapStatus !== "ready" || !mapRef.current) return;
-    const map = mapRef.current;
-
-    const onClick = (e: MapMouseEvent & { features?: MapGeoJSONFeature[] }) => {
-      const feat = e.features?.[0];
-      if (!feat) return;
-      const props = feat.properties as Record<string, unknown>;
-
-      // Find matching GeoFeature from data
-      if (activeCategory && data) {
-        const features = data[activeCategory] ?? [];
-        const match = features.find((f) => f.id === props.id);
-        if (match) {
-          setSelectedFeature(match);
-        }
-      }
-    };
-
-    // Attach to all overlay layers
-    const layerIds: string[] = [];
-    for (const sid of overlaySourceIdsRef.current) {
-      for (const suffix of ["overlay-fill", "overlay-outline", "overlay-line", "overlay-point"]) {
-        const lid = `${suffix}-${sid}`;
-        if (map.getLayer(lid)) {
-          map.on("click", lid, onClick);
-          layerIds.push(lid);
-        }
+        const ll: L.LatLngExpression = [f.latitude, f.longitude];
+        boundsPoints.push(ll);
+        L.circleMarker(ll, {
+          radius: 5,
+          color: "#fff",
+          weight: 1,
+          fillColor: config.color,
+          fillOpacity: 0.9,
+        })
+          .on("click", onClick)
+          .bindTooltip(f.name || f.ref || f.id, { direction: "top" })
+          .addTo(group);
       }
     }
 
-    // Change cursor on hover
-    const onEnter = () => { map.getCanvas().style.cursor = "pointer"; };
-    const onLeave = () => { map.getCanvas().style.cursor = ""; };
-    for (const lid of layerIds) {
-      map.on("mouseenter", lid, onEnter);
-      map.on("mouseleave", lid, onLeave);
-    }
-
-    return () => {
-      for (const lid of layerIds) {
-        map.off("click", lid, onClick);
-        map.off("mouseenter", lid, onEnter);
-        map.off("mouseleave", lid, onLeave);
+    if (boundsPoints.length > 0) {
+      const bounds = L.latLngBounds(boundsPoints);
+      if (bounds.isValid()) {
+        mapRef.current!.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
       }
-    };
-  }, [mapStatus, activeCategory, data]);
+    }
+  }, [activeCategory, data, mapReady]);
 
   // Focus on selected feature
   useEffect(() => {
-    if (mapStatus !== "ready" || !mapRef.current || !selectedFeature) return;
-    mapRef.current.flyTo({
-      center: [selectedFeature.longitude, selectedFeature.latitude],
-      zoom: 16,
-      duration: 500,
-    });
-  }, [selectedFeature, mapStatus]);
+    if (!mapReady || !mapRef.current || !selectedFeature) return;
+    mapRef.current.setView([selectedFeature.latitude, selectedFeature.longitude], 16, { animate: true });
+  }, [selectedFeature, mapReady]);
 
   const handleResetView = () => {
     setSelectedFeature(null);
     setActiveCategory(null);
+    overlayGroupRef.current?.clearLayers();
     if (mapRef.current) {
-      for (const sid of overlaySourceIdsRef.current) {
-        for (const suffix of ["overlay-fill", "overlay-outline", "overlay-line", "overlay-point"]) {
-          const lid = `${suffix}-${sid}`;
-          if (mapRef.current.getLayer(lid)) mapRef.current.removeLayer(lid);
-        }
-        if (mapRef.current.getSource(sid)) mapRef.current.removeSource(sid);
-      }
-      overlaySourceIdsRef.current = [];
-      mapRef.current.flyTo({ center: [longitude, latitude], zoom: 13, duration: 500 });
+      mapRef.current.setView([latitude, longitude], 13);
     }
   };
 
@@ -429,40 +254,7 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
 
       {/* Map */}
       <div className="relative flex-1 min-h-[300px]">
-        {mapStatus === "loading" && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0a0f1a]">
-            <div className="text-center space-y-3">
-              <Loader2 className="size-5 animate-spin text-primary mx-auto" />
-              <p className="text-[10px] text-muted-foreground font-mono">Loading map...{mapLoadTicks > 0 ? ` ${mapLoadTicks}s` : ""}</p>
-              {mapLoadTicks >= 5 && (
-                <p className="text-[10px] text-muted-foreground/50">Taking longer than usual</p>
-              )}
-            </div>
-          </div>
-        )}
-        {mapStatus === "error" && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0a0f1a]">
-            <div className="text-center space-y-2">
-              <AlertCircle className="size-5 text-white/30 mx-auto" />
-              <p className="text-xs text-muted-foreground">Map failed to load</p>
-              <p className="text-[10px] text-muted-foreground/60 max-w-[260px]">
-                OpenFreeMap could not be loaded. The airport infrastructure data is available, but the basemap is unavailable.
-              </p>
-              <button
-                onClick={() => { setMapStatus("loading"); setMapLoadTicks(0); setMapRetryKey((k) => k + 1); }}
-                className="mt-1 text-[10px] text-primary hover:underline"
-              >
-                Retry
-              </button>
-            </div>
-          </div>
-        )}
-        <div ref={mapContainerRef} className="h-full w-full" />
-        <div className="absolute bottom-1 right-2 z-20 pointer-events-none">
-          <span className="text-[9px] text-white/30 font-mono">
-            &copy; OpenFreeMap &copy; OpenStreetMap contributors
-          </span>
-        </div>
+        <div ref={mapContainerRef} className="h-full w-full" style={{ minHeight: 300 }} />
       </div>
 
       {/* Feature list / detail panel */}

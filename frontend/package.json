@@ -23,7 +23,6 @@
     "date-fns": "^4.4.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.39.0",
-    "maplibre-gl": "^6.9.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-leaflet": "^5.0.0",
