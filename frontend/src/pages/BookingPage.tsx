@@ -32,8 +32,6 @@ import {
   Info,
   Search,
   Calendar,
-  Building2,
-  CheckCircle2,
   ExternalLink,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -369,7 +367,7 @@ export function BookingPage() {
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Trip type</Label>
-                    <Select value={tripType} onValueChange={setTripType}>
+                    <Select value={tripType} onValueChange={(v) => setTripType(v ?? "")}>
                       <SelectTrigger className="h-9 bg-white/5 border-white/10 font-mono text-sm">
                         <SelectValue />
                       </SelectTrigger>
@@ -391,7 +389,7 @@ export function BookingPage() {
                 <div className="grid gap-3 grid-cols-1 sm:grid-cols-4">
                   <div className="space-y-1">
                     <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Adults</Label>
-                    <Select value={adults} onValueChange={setAdults}>
+                    <Select value={adults} onValueChange={(v) => setAdults(v ?? "")}>
                       <SelectTrigger className="h-9 bg-white/5 border-white/10 font-mono text-sm">
                         <SelectValue />
                       </SelectTrigger>
@@ -402,7 +400,7 @@ export function BookingPage() {
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Cabin class</Label>
-                    <Select value={cabin} onValueChange={setCabin}>
+                    <Select value={cabin} onValueChange={(v) => setCabin(v ?? "")}>
                       <SelectTrigger className="h-9 bg-white/5 border-white/10 font-mono text-sm">
                         <SelectValue />
                       </SelectTrigger>
@@ -416,7 +414,7 @@ export function BookingPage() {
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Max stops</Label>
-                    <Select value={maxStops} onValueChange={setMaxStops}>
+                    <Select value={maxStops} onValueChange={(v) => setMaxStops(v ?? "")}>
                       <SelectTrigger className="h-9 bg-white/5 border-white/10 font-mono text-sm">
                         <SelectValue />
                       </SelectTrigger>
