@@ -187,6 +187,20 @@ export interface IgnavLegDto {
   duration: string | null;
 }
 
+export interface IgnavSegmentDto {
+  origin: string | null;
+  destination: string | null;
+  departureTime: string | null;
+  arrivalTime: string | null;
+  departureTimeUtc: string | null;
+  arrivalTimeUtc: string | null;
+  duration: string | null;
+  marketingCarrierCode: string | null;
+  flightNumber: string | null;
+  operatingCarrierName: string | null;
+  aircraft: string | null;
+}
+
 export interface IgnavItineraryDto {
   ignavId: string;
   airline: string | null;
@@ -203,8 +217,10 @@ export interface IgnavItineraryDto {
   priceAmount: number | null;
   priceCurrency: string | null;
   priceStatus: string | null;
+  requiresSelfTransfer: boolean | null;
+  bags: string | null;
   legs: IgnavLegDto[];
-  segments: { origin: string | null; destination: string | null; departureTime: string | null; arrivalTime: string | null; duration: string | null }[];
+  segments: IgnavSegmentDto[];
 }
 
 export interface IgnavSearchResponse {

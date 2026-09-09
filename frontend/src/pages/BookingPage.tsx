@@ -9,7 +9,7 @@ import type {
   PageResponse,
   IgnavItineraryDto,
   IgnavProviderLink,
-  IgnavBookingOption,
+  IgnavSegmentDto,
 } from "@/types/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -36,12 +36,19 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 
+function formatDuration(dur: string | null): string {
+  if (!dur) return "";
+  const m = dur.match(/(\d+)h\s*(\d+)?m?/);
+  if (m) return `${m[1]}h${m[2] ? ` ${m[2]}m` : ""}`;
+  return dur;
+}
+
 export function BookingPage() {
   const navigate = useNavigate();
   const [bookings, setBookings] = useState<BookingResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // ── Ignav search state ──
+  // Ignav search state
   const [origin, setOrigin] = useState("");
   const [destination, setDestination] = useState("");
   const [departureDate, setDepartureDate] = useState("");
@@ -56,23 +63,23 @@ export function BookingPage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
-  // ── AI recommendation — preserved (DO NOT CHANGE LOGIC) ──
+  // AI recommendation
   const [aiQuery, setAiQuery] = useState("");
   const [aiResult, setAiResult] = useState<RecommendationResponse | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
-  // ── Booking-links state ──
+  // Booking-links state
   const [selectedItinerary, setSelectedItinerary] = useState<IgnavItineraryDto | null>(null);
-  const [bookingOptions, setBookingOptions] = useState<IgnavBookingOption[]>([]);
+  const [bookingOptions, setBookingOptions] = useState<{ legIndexes: number[]; links: IgnavProviderLink[] }[]>([]);
   const [bookingLinksLoading, setBookingLinksLoading] = useState(false);
   const [bookingLinksError, setBookingLinksError] = useState<string | null>(null);
 
-  // ── Book click state ──
+  // Book click state
   const [bookingSaving, setBookingSaving] = useState(false);
   const [bookingSavingError, setBookingSavingError] = useState<string | null>(null);
 
-  // ── My bookings paginated history ──
+  // My bookings
   const [myBookings, setMyBookings] = useState<BookingResponse[] | null>(null);
   const [pageInfo, setPageInfo] = useState<{ page: number; size: number; totalPages: number; totalElements: number } | null>(null);
   const [page, setPage] = useState(0);
@@ -99,7 +106,7 @@ export function BookingPage() {
     }
   };
 
-  // ── Ignav search handler ──
+  // Ignav search handler
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     const o = origin.trim().toUpperCase();
@@ -126,7 +133,6 @@ export function BookingPage() {
         cabin: cabin || undefined,
         maxStops: maxStops === "any" ? undefined : parseInt(maxStops, 10),
         market: market.trim().toUpperCase() || undefined,
-        tripType: tripType || undefined,
       });
       setSearchResults(res.itineraries ?? []);
       if (!res.itineraries || res.itineraries.length === 0) {
@@ -140,7 +146,7 @@ export function BookingPage() {
     }
   };
 
-  // ── Select itinerary → fetch booking links ──
+  // Select itinerary -> fetch booking links
   const handleSelectItinerary = async (itinerary: IgnavItineraryDto) => {
     setSelectedItinerary(itinerary);
     setBookingOptions([]);
@@ -158,17 +164,25 @@ export function BookingPage() {
     }
   };
 
-  // ── Book click → save itinerary + redirect ──
-  // NOTE: bookingUrl is NOT sent to backend for security.
-  // The redirect uses the in-memory link.url from Ignav's trusted response.
-  // Active Itineraries re-fetch fresh URLs via ignavService.bookingLinks().
+  // Book click -> save itinerary + redirect
   const handleBook = async (link: IgnavProviderLink, itinerary: IgnavItineraryDto) => {
     if (!link.url) { setBookingSavingError("No booking URL available for this option."); return; }
     setBookingSaving(true);
     setBookingSavingError(null);
-    const redirectUrl = link.url; // capture before async save
+    const redirectUrl = link.url;
     try {
-      const legsJson = itinerary.legs && itinerary.legs.length > 0 ? JSON.stringify(itinerary.legs) : null;
+      const legsJson = itinerary.segments && itinerary.segments.length > 0
+        ? JSON.stringify(itinerary.segments.map(s => ({
+            origin: s.origin,
+            destination: s.destination,
+            departureTime: s.departureTime,
+            arrivalTime: s.arrivalTime,
+            airline: s.operatingCarrierName ?? s.marketingCarrierCode,
+            flightNumber: s.flightNumber,
+            aircraft: s.aircraft,
+            duration: s.duration,
+          })))
+        : null;
       await bookingService.create({
         flightNumber: itinerary.flightNumber ?? "—",
         origin: itinerary.origin ?? "—",
@@ -183,7 +197,6 @@ export function BookingPage() {
         priceStatus: link.priceStatus ?? itinerary.priceStatus ?? null,
         providerName: link.providerName ?? null,
         providerType: link.providerType ?? null,
-        // bookingUrl intentionally omitted — never trust frontend-submitted URLs
         cabin: itinerary.cabin ?? null,
         duration: itinerary.duration ?? null,
         stops: itinerary.stops ?? null,
@@ -204,7 +217,7 @@ export function BookingPage() {
     }
   };
 
-  // ── AI helpers (from old frontend) — DO NOT MODIFY LOGIC ──
+  // AI helpers
   const recommendationToDto = (flight: NonNullable<RecommendationResponse["recommended_flight"]>["flight"]): IgnavItineraryDto => ({
     ignavId: flight.flight_number ?? `ai-${Date.now()}`,
     airline: flight.airline ?? null,
@@ -221,6 +234,8 @@ export function BookingPage() {
     priceAmount: null,
     priceCurrency: null,
     priceStatus: null,
+    requiresSelfTransfer: null,
+    bags: null,
     legs: [],
     segments: [],
   });
@@ -307,7 +322,6 @@ export function BookingPage() {
     }
   };
 
-  // Active Itineraries — only future flights
   const upcomingBookings = bookings.filter((b) => {
     if (!b.departureScheduled) return false;
     const dep = new Date(b.departureScheduled);
@@ -343,7 +357,7 @@ export function BookingPage() {
         <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-6 items-start">
           {/* LEFT 60% */}
           <div className="space-y-6 min-w-0">
-            {/* ── Ignav Search Form ── */}
+            {/* Ignav Search Form */}
             <div className="glass-panel-heavy rounded-xl p-4 shadow-xl space-y-4">
               <div className="space-y-1">
                 <h2 className="text-xs uppercase tracking-widest font-semibold text-white flex items-center gap-2">
@@ -451,8 +465,8 @@ export function BookingPage() {
               )}
             </div>
 
-            {/* ── Flight Results ── */}
-            <div className="glass-panel rounded-xl p-6 space-y-4">
+            {/* Flight Results - 2 column grid */}
+            <div className="space-y-4">
               <div className="space-y-1">
                 <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
                   <Search className="size-4 text-primary" /> Flight results
@@ -463,9 +477,9 @@ export function BookingPage() {
               </div>
 
               {searchLoading && (
-                <div className="space-y-2">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-24 w-full rounded-lg bg-white/5 animate-pulse" />
+                <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="h-36 w-full rounded-lg bg-white/5 animate-pulse" />
                   ))}
                 </div>
               )}
@@ -481,54 +495,129 @@ export function BookingPage() {
               )}
 
               {searchResults && searchResults.length > 0 && (
-                <div className="space-y-2">
+                <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
                   {searchResults.map((it) => {
                     const isSelected = selectedItinerary?.ignavId === it.ignavId;
+                    const segs = it.segments ?? [];
+                    const firstSeg = segs[0];
+                    const lastSeg = segs[segs.length - 1];
+                    const dep = firstSeg?.departureTime;
+                    const arr = lastSeg?.arrivalTime;
+                    const airline = firstSeg?.operatingCarrierName ?? it.airline;
+                    const carrierCode = firstSeg?.marketingCarrierCode ?? it.airlineCode;
+                    const flightNum = firstSeg?.flightNumber ?? it.flightNumber;
+
                     return (
                       <div
                         key={it.ignavId}
-                        className={`rounded-xl border p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
+                        className={`rounded-xl border p-4 flex flex-col gap-3 transition-colors ${
                           isSelected ? "border-primary/40 bg-primary/[0.06]" : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"
                         }`}
                       >
-                        <div className="space-y-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono text-sm font-semibold text-white">{it.flightNumber ?? "—"}</span>
-                            {it.airline && <span className="text-xs text-muted-foreground">{it.airline}</span>}
-                            {it.stops !== null && (
-                              <Badge variant="outline" className="text-[10px] border-white/15 text-white">
-                                {it.stops === 0 ? "Non-stop" : `${it.stops} stop${it.stops > 1 ? "s" : ""}`}
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="text-xs text-white">
-                            {it.origin ?? "—"} → {it.destination ?? "—"}{" "}
-                            {it.departureTime && (
-                              <span className="text-muted-foreground">
-                                {format(new Date(it.departureTime), "MMM dd, HH:mm")}
-                              </span>
-                            )}
-                            {it.duration && <span className="text-muted-foreground ml-2">({it.duration})</span>}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {it.aircraft && <span>✈ {it.aircraft}</span>}
-                            {it.cabin && <span className="ml-2">· {it.cabin}</span>}
+                        {/* Card header: airline + price */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {carrierCode && <span className="font-mono text-xs font-bold text-primary">{carrierCode}</span>}
+                            {airline && <span className="text-[11px] text-muted-foreground truncate max-w-[140px]">{airline}</span>}
                           </div>
                           {it.priceAmount !== null && (
-                            <div className="text-xs font-semibold text-primary">
+                            <div className="text-sm font-bold text-primary">
                               {it.priceCurrency ?? ""} {it.priceAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                             </div>
                           )}
                         </div>
-                        <Button
-                          size="sm"
-                          onClick={() => handleSelectItinerary(it)}
-                          disabled={bookingLinksLoading && isSelected}
-                          className={`gap-1.5 shrink-0 uppercase tracking-wider text-xs ${isSelected ? "bg-primary text-primary-foreground" : ""}`}
-                        >
-                          {bookingLinksLoading && isSelected ? <Loader2 className="size-4 animate-spin" /> : <Ticket className="size-4" />}
-                          {isSelected ? "Loading links…" : "Select"}
-                        </Button>
+
+                        {/* Route: ORIGIN -> DESTINATION with times */}
+                        <div className="flex items-center gap-3">
+                          <div className="space-y-0.5 min-w-0">
+                            <p className="font-mono text-lg font-bold text-white leading-none">{it.origin ?? "—"}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">
+                              {dep ? format(new Date(dep), "HH:mm") : ""}
+                            </p>
+                          </div>
+                          <div className="flex-1 flex flex-col items-center gap-0.5 px-2">
+                            <div className="text-[10px] text-muted-foreground">{formatDuration(it.duration)}</div>
+                            <div className="w-full h-px bg-white/20 relative">
+                              <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary" />
+                              {it.stops !== null && it.stops !== undefined && it.stops > 0 && Array.from({ length: it.stops }).map((_, i) => (
+                                <div key={i} className="absolute top-1/2 -translate-y-1/2 w-1 h-1 rounded-full bg-muted-foreground" style={{ left: `${((i + 1) / (it.stops! + 1)) * 100}%` }} />
+                              ))}
+                              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary" />
+                            </div>
+                            <div className="text-[10px] text-muted-foreground">
+                              {it.stops === 0 ? "Non-stop" : it.stops !== null ? `${it.stops} stop${it.stops > 1 ? "s" : ""}` : ""}
+                            </div>
+                          </div>
+                          <div className="space-y-0.5 min-w-0 text-right">
+                            <p className="font-mono text-lg font-bold text-white leading-none">{it.destination ?? "—"}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">
+                              {arr ? format(new Date(arr), "HH:mm") : ""}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Flight number + cabin */}
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                          <span className="font-mono">{flightNum ?? "—"}</span>
+                          <span className="capitalize">{it.cabin ?? ""}</span>
+                        </div>
+
+                        {/* Select / Booking links inline */}
+                        {!isSelected ? (
+                          <Button
+                            size="sm"
+                            onClick={() => handleSelectItinerary(it)}
+                            disabled={bookingLinksLoading}
+                            className="gap-1.5 w-full uppercase tracking-wider text-xs font-semibold"
+                          >
+                            <Ticket className="size-4" /> View booking options
+                          </Button>
+                        ) : (
+                          <div className="space-y-3 border-t border-white/10 pt-3">
+                            {bookingLinksLoading && (
+                              <div className="flex justify-center py-4">
+                                <Loader2 className="size-5 animate-spin text-primary" />
+                              </div>
+                            )}
+                            {bookingLinksError && (
+                              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-2 flex gap-2">
+                                <AlertCircle className="size-3.5 text-destructive shrink-0 mt-0.5" />
+                                <p className="text-[11px] text-destructive">{bookingLinksError}</p>
+                              </div>
+                            )}
+                            {!bookingLinksLoading && !bookingLinksError && bookingOptions.length === 0 && (
+                              <p className="text-[11px] text-muted-foreground text-center py-2">No booking options available.</p>
+                            )}
+                            {!bookingLinksLoading && !bookingLinksError && allProviders.length > 0 && (
+                              <div className="space-y-2">
+                                {allProviders.map((link, idx) => (
+                                  <div key={idx} className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.03] p-2.5">
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-semibold text-white truncate">{link.providerName ?? "Provider"}</p>
+                                      <div className="text-[11px] text-muted-foreground">
+                                        {link.priceAmount !== null && (
+                                          <span className="text-primary font-semibold">
+                                            {link.priceCurrency ?? ""} {link.priceAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                          </span>
+                                        )}
+                                        {link.providerType && <span className="ml-1.5">· {link.providerType}</span>}
+                                      </div>
+                                    </div>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleBook(link, it)}
+                                      disabled={bookingSaving}
+                                      className="gap-1 shrink-0 uppercase tracking-wider text-[10px] font-semibold h-7"
+                                    >
+                                      {bookingSaving ? <Loader2 className="size-3 animate-spin" /> : <ExternalLink className="size-3" />}
+                                      Book
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -540,73 +629,7 @@ export function BookingPage() {
               )}
             </div>
 
-            {/* ── Booking Links Panel ── */}
-            {selectedItinerary && (
-              <div className="glass-panel rounded-xl p-6 space-y-4 border border-primary/20">
-                <div className="space-y-1">
-                  <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
-                    <ExternalLink className="size-4 text-primary" /> Booking options
-                  </h2>
-                  <p className="text-xs text-muted-foreground">
-                    {selectedItinerary.flightNumber} · {selectedItinerary.origin} → {selectedItinerary.destination}
-                    {selectedItinerary.departureTime && ` · ${format(new Date(selectedItinerary.departureTime), "MMM dd, HH:mm")}`}
-                  </p>
-                </div>
-
-                {bookingLinksLoading && (
-                  <div className="space-y-2">
-                    {[1, 2].map((i) => (
-                      <div key={i} className="h-16 w-full rounded-lg bg-white/5 animate-pulse" />
-                    ))}
-                  </div>
-                )}
-
-                {bookingLinksError && (
-                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex gap-2">
-                    <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
-                    <p className="text-xs text-destructive">{bookingLinksError}</p>
-                  </div>
-                )}
-
-                {!bookingLinksLoading && !bookingLinksError && bookingOptions.length === 0 && (
-                  <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 flex gap-3">
-                    <Info className="size-4 text-muted-foreground shrink-0 mt-0.5" />
-                    <p className="text-xs text-muted-foreground">Booking links are currently unavailable for this flight.</p>
-                  </div>
-                )}
-
-                {!bookingLinksLoading && !bookingLinksError && allProviders.length > 0 && (
-                  <div className="space-y-2">
-                    {allProviders.map((link, idx) => (
-                      <div key={idx} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="space-y-0.5 min-w-0">
-                          <p className="text-sm font-semibold text-white">{link.providerName ?? "Provider"}</p>
-                          <div className="text-xs text-muted-foreground">
-                            {link.priceAmount !== null && (
-                              <span className="text-primary font-semibold">
-                                {link.priceCurrency ?? ""} {link.priceAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                              </span>
-                            )}
-                            {link.providerType && <span className="ml-2">· {link.providerType}</span>}
-                          </div>
-                        </div>
-                        <Button
-                          size="sm"
-                          onClick={() => handleBook(link, selectedItinerary)}
-                          disabled={bookingSaving}
-                          className="gap-1.5 shrink-0 uppercase tracking-wider text-xs"
-                        >
-                          {bookingSaving ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
-                          {bookingSaving ? "Preparing…" : "Book"}
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── Active Itineraries — FUTURE ONLY ── */}
+            {/* Active Itineraries */}
             <div className="space-y-4">
               <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
                 <Ticket className="size-4 text-primary" /> Active Itineraries
@@ -697,7 +720,7 @@ export function BookingPage() {
               )}
             </div>
 
-            {/* ── My bookings ── */}
+            {/* My bookings */}
             <div className="glass-panel rounded-xl p-6 space-y-4">
               <div className="flex flex-row items-center justify-between gap-4">
                 <div className="space-y-1">
@@ -800,7 +823,7 @@ export function BookingPage() {
             </div>
           </div>
 
-          {/* RIGHT 40% — AI Flight Recommendation (logic unchanged, only repositioned) */}
+          {/* RIGHT 40% — AI Flight Recommendation */}
           <div className="glass-panel rounded-xl p-6 space-y-4 border border-white/10 min-w-0 lg:sticky lg:top-24">
             <div className="space-y-1.5">
               <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2 text-white">
