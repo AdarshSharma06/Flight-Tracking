@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 @Service
@@ -50,20 +51,25 @@ public class IgnavService {
                 }
             }
         }
-        // If raw was single object with ignav_id, treat as single
         if (list.isEmpty() && root.has("ignav_id")) {
             try {
                 IgnavItineraryDto dto = parseItinerary(root);
                 if (dto != null) list.add(dto);
             } catch (Exception ignored) {}
         }
-        return new IgnavSearchResponse(list, list.size(), root.has("request_id") ? root.get("request_id").asText() : null);
+
+        // Top-6 cheapest: sort by price, take up to 6
+        list.sort(Comparator.comparingDouble(d -> d.priceAmount() != null ? d.priceAmount() : Double.MAX_VALUE));
+        List<IgnavItineraryDto> top6 = list.size() > 6 ? list.subList(0, 6) : list;
+
+        return new IgnavSearchResponse(top6, top6.size(), root.has("request_id") ? root.get("request_id").asText() : null);
     }
 
     private IgnavItineraryDto parseItinerary(JsonNode n) {
         String ignavId = text(n, "ignav_id", "itinerary_id", "id");
         if (ignavId == null) return null;
 
+        // Price
         JsonNode price = n.get("price");
         Double amount = null;
         String currency = null;
@@ -74,53 +80,95 @@ public class IgnavService {
             status = text(price, "status", "state");
         }
 
-        // legs
-        List<IgnavItineraryDto.IgnavLegDto> legs = new ArrayList<>();
-        JsonNode legsNode = n.get("legs");
-        if (legsNode != null && legsNode.isArray()) {
-            for (JsonNode leg : legsNode) {
-                legs.add(new IgnavItineraryDto.IgnavLegDto(
-                        text(leg, "origin", "from", "departure_airport"),
-                        text(leg, "destination", "to", "arrival_airport"),
-                        text(leg, "departure_time", "departure", "departure_at"),
-                        text(leg, "arrival_time", "arrival", "arrival_at"),
-                        text(leg, "airline", "carrier", "airline_name"),
-                        text(leg, "flight_number", "flight", "number"),
-                        text(leg, "aircraft", "plane", "equipment"),
-                        text(leg, "duration")
-                ));
+        // Read outbound object (actual Ignav format)
+        JsonNode outbound = n.get("outbound");
+        List<IgnavItineraryDto.IgnavSegmentDto> segments = new ArrayList<>();
+        String airline = null;
+        String airlineCode = null;
+        String flightNumber = null;
+        String origin = null;
+        String destination = null;
+        String departureTime = null;
+        String arrivalTime = null;
+        String duration = null;
+        Integer stops = null;
+        String aircraft = null;
+
+        if (outbound != null && outbound.isObject()) {
+            airline = text(outbound, "carrier", "airline", "carrier_name");
+            if (outbound.has("duration_minutes")) {
+                int mins = outbound.get("duration_minutes").asInt();
+                duration = String.format("%dh%02dm", mins / 60, mins % 60);
+            }
+
+            JsonNode segs = outbound.get("segments");
+            if (segs != null && segs.isArray()) {
+                for (JsonNode seg : segs) {
+                    segments.add(new IgnavItineraryDto.IgnavSegmentDto(
+                            text(seg, "departure_airport", "origin"),
+                            text(seg, "arrival_airport", "destination"),
+                            text(seg, "departure_time_local", "departure_time"),
+                            text(seg, "arrival_time_local", "arrival_time"),
+                            text(seg, "departure_time_utc"),
+                            text(seg, "arrival_time_utc"),
+                            seg.has("duration_minutes") ? String.format("%dh%02dm", seg.get("duration_minutes").asInt() / 60, seg.get("duration_minutes").asInt() % 60) : null,
+                            text(seg, "marketing_carrier_code"),
+                            text(seg, "flight_number"),
+                            text(seg, "operating_carrier_name"),
+                            text(seg, "aircraft")
+                    ));
+                }
+            }
+
+            if (!segments.isEmpty()) {
+                origin = segments.get(0).origin();
+                destination = segments.get(segments.size() - 1).destination();
+                departureTime = segments.get(0).departureTime();
+                arrivalTime = segments.get(segments.size() - 1).arrivalTime();
+                if (airlineCode == null) airlineCode = segments.get(0).marketingCarrierCode();
+                if (flightNumber == null) flightNumber = segments.get(0).flightNumber();
+                if (aircraft == null) aircraft = segments.get(segments.size() - 1).aircraft();
+                stops = Math.max(0, segments.size() - 1);
             }
         }
 
-        // Try to derive origin/destination/duration from legs or direct fields
-        String origin = text(n, "origin", "from");
-        String destination = text(n, "destination", "to");
-        if (origin == null && !legs.isEmpty()) origin = legs.get(0).origin();
-        if (destination == null && !legs.isEmpty()) destination = legs.get(legs.size()-1).destination();
+        // Fallback: try legacy "legs" format if outbound parsing yielded nothing
+        if (segments.isEmpty()) {
+            List<IgnavItineraryDto.IgnavLegDto> legs = new ArrayList<>();
+            JsonNode legsNode = n.get("legs");
+            if (legsNode != null && legsNode.isArray()) {
+                for (JsonNode leg : legsNode) {
+                    legs.add(new IgnavItineraryDto.IgnavLegDto(
+                            text(leg, "origin", "from", "departure_airport"),
+                            text(leg, "destination", "to", "arrival_airport"),
+                            text(leg, "departure_time", "departure"),
+                            text(leg, "arrival_time", "arrival"),
+                            text(leg, "airline", "carrier"),
+                            text(leg, "flight_number", "flight"),
+                            text(leg, "aircraft", "plane"),
+                            text(leg, "duration")
+                    ));
+                }
+            }
+            if (origin == null && !legs.isEmpty()) origin = legs.get(0).origin();
+            if (destination == null && !legs.isEmpty()) destination = legs.get(legs.size() - 1).destination();
+            if (airline == null && !legs.isEmpty()) airline = legs.get(0).airline();
+            if (flightNumber == null && !legs.isEmpty()) flightNumber = legs.get(0).flightNumber();
+            if (departureTime == null && !legs.isEmpty()) departureTime = legs.get(0).departureTime();
+            if (arrivalTime == null && !legs.isEmpty()) arrivalTime = legs.get(legs.size() - 1).arrivalTime();
+            if (stops == null && !legs.isEmpty()) stops = Math.max(0, legs.size() - 1);
+        }
 
-        String airline = text(n, "airline", "carrier", "airline_name");
-        String flightNumber = text(n, "flight_number", "flight", "number");
-        if (airline == null && !legs.isEmpty()) airline = legs.get(0).airline();
-        if (flightNumber == null && !legs.isEmpty()) flightNumber = legs.get(0).flightNumber();
-
-        String departureTime = text(n, "departure_time", "departure", "departure_at", "outbound_departure");
-        String arrivalTime = text(n, "arrival_time", "arrival", "arrival_at", "inbound_arrival");
-        if (departureTime == null && !legs.isEmpty()) departureTime = legs.get(0).departureTime();
-        if (arrivalTime == null && !legs.isEmpty()) arrivalTime = legs.get(legs.size()-1).arrivalTime();
-
-        String duration = text(n, "duration", "total_duration");
-        Integer stops = null;
-        if (n.has("stops")) stops = n.get("stops").asInt();
-        else if (n.has("num_stops")) stops = n.get("num_stops").asInt();
-        else if (!legs.isEmpty()) stops = Math.max(0, legs.size() - 1);
-
-        String aircraft = text(n, "aircraft", "plane");
-        String cabin = text(n, "cabin", "cabin_class", "class");
+        String cabin = text(n, "cabin_class", "cabin", "class");
+        Boolean requiresSelfTransfer = null;
+        if (n.has("requires_self_transfer")) requiresSelfTransfer = n.get("requires_self_transfer").asBoolean();
+        String bags = text(n, "bags");
 
         return new IgnavItineraryDto(
-                ignavId, airline, text(n, "airline_code", "carrier_code"), flightNumber,
+                ignavId, airline, airlineCode, flightNumber,
                 origin, destination, departureTime, arrivalTime, duration, stops,
-                aircraft, cabin, amount, currency, status, legs, List.of()
+                aircraft, cabin, amount, currency, status,
+                requiresSelfTransfer, bags, List.of(), segments
         );
     }
 
@@ -135,7 +183,6 @@ public class IgnavService {
 
         if (bookingOptions != null && bookingOptions.isArray()) {
             for (JsonNode opt : bookingOptions) {
-                // opt may be booking_option with leg_indexes + links, or direct link
                 if (opt.has("links") && opt.get("links").isArray()) {
                     List<Integer> legIndexes = new ArrayList<>();
                     JsonNode li = opt.get("leg_indexes");
@@ -147,13 +194,11 @@ public class IgnavService {
                     }
                     opts.add(new IgnavBookingLinksResponse.BookingOption(legIndexes, links));
                 } else if (opt.has("provider_name") || opt.has("url")) {
-                    // single link wrapped as option
                     List<IgnavBookingLinksResponse.ProviderLink> links = List.of(parseLink(opt));
                     opts.add(new IgnavBookingLinksResponse.BookingOption(List.of(0), links));
                 }
             }
         }
-        // Handle case where root has direct links array without booking_options wrapper
         if (opts.isEmpty() && root.has("url")) {
             opts.add(new IgnavBookingLinksResponse.BookingOption(List.of(0), List.of(parseLink(root))));
         }

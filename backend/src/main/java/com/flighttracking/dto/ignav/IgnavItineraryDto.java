@@ -18,6 +18,8 @@ public record IgnavItineraryDto(
         Double priceAmount,
         String priceCurrency,
         String priceStatus,
+        Boolean requiresSelfTransfer,
+        String bags,
         List<IgnavLegDto> legs,
         List<IgnavSegmentDto> segments
 ) {
@@ -37,6 +39,12 @@ public record IgnavItineraryDto(
             String destination,
             String departureTime,
             String arrivalTime,
-            String duration
+            String departureTimeUtc,
+            String arrivalTimeUtc,
+            String duration,
+            String marketingCarrierCode,
+            String flightNumber,
+            String operatingCarrierName,
+            String aircraft
     ) {}
 }
