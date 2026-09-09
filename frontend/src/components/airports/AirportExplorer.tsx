@@ -252,7 +252,28 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
   }
 
   const availableCategories = getAvailableCategories();
+  const hasAnyData = availableCategories.length > 0;
   const activeFeatures = activeCategory ? (data?.[activeCategory] ?? []) : [];
+
+  if (!loading && !error && data && !hasAnyData) {
+    return (
+      <div className="glass-panel rounded-xl h-full min-h-[500px] flex flex-col items-center justify-center gap-3 p-6">
+        <Layers className="size-8 text-white/15" />
+        <div className="text-center space-y-1.5">
+          <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground">No mapped infrastructure</p>
+          <p className="text-[11px] text-muted-foreground max-w-[280px] leading-relaxed">
+            OpenStreetMap data is currently unavailable or incomplete for this airport.
+          </p>
+        </div>
+        <button
+          onClick={handleResetView}
+          className="mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-white/[0.03] text-[10px] uppercase tracking-widest font-semibold text-muted-foreground hover:text-white hover:border-white/20 transition-colors"
+        >
+          <RotateCcw className="size-3" /> Reset View
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="glass-panel rounded-xl overflow-hidden flex flex-col h-full">
