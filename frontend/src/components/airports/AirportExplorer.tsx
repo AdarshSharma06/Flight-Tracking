@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
+import * as maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import type { AirportExplorerData, GeoFeature } from "@/types/api";
 import { Loader2, AlertCircle, MapPin, PlaneTakeoff, Building2, Car, Coffee, ChevronRight, RotateCcw, Layers, X } from "lucide-react";
 
@@ -23,27 +24,42 @@ const CATEGORY_CONFIG: Record<Category, { label: string; icon: React.ReactNode; 
   amenities: { label: "Amenities", icon: <Coffee className="size-3" />, color: "#f472b6" },
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let explorerCachedLibs: any = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let explorerGoogle: any = null;
+function featuresToGeoJSON(features: GeoFeature[]): GeoJSON.FeatureCollection {
+  const out: GeoJSON.Feature[] = [];
+  for (const f of features) {
+    if (f.geometry && f.geometry.length > 0 && f.geometry[0].length > 0) {
+      const coords = f.geometry[0] as unknown as number[][];
+      const lngLatCoords = coords.map((c) => [c[1], c[0]]);
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-    promise.then(
-      (v) => { clearTimeout(timer); resolve(v); },
-      (e) => { clearTimeout(timer); reject(e); },
-    );
-  });
+      if (lngLatCoords.length >= 3) {
+        out.push({
+          type: "Feature",
+          properties: { id: f.id, name: f.name, ref: f.ref, category: f.category, ...f.properties },
+          geometry: { type: "Polygon", coordinates: [lngLatCoords] },
+        });
+      } else if (lngLatCoords.length >= 2) {
+        out.push({
+          type: "Feature",
+          properties: { id: f.id, name: f.name, ref: f.ref, category: f.category, ...f.properties },
+          geometry: { type: "LineString", coordinates: lngLatCoords },
+        });
+      }
+    } else {
+      out.push({
+        type: "Feature",
+        properties: { id: f.id, name: f.name, ref: f.ref, category: f.category, ...f.properties },
+        geometry: { type: "Point", coordinates: [f.longitude, f.latitude] },
+      });
+    }
+  }
+  return { type: "FeatureCollection", features: out };
 }
 
 export function AirportExplorer({ data, loading, error, latitude, longitude, iata }: AirportExplorerProps) {
-  const mapRef = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mapInstanceRef = useRef<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const overlaysRef = useRef<any[]>([]);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const markerRef = useRef<maplibregl.Marker | null>(null);
+  const overlaySourceIdsRef = useRef<string[]>([]);
   const [mapStatus, setMapStatus] = useState<"loading" | "ready" | "error">("loading");
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
   const [selectedFeature, setSelectedFeature] = useState<GeoFeature | null>(null);
@@ -53,180 +69,237 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     return data[cat]?.length ?? 0;
   }, [data]);
 
-  // Initialize Google Map
+  // Initialize MapLibre map
   useEffect(() => {
-    if (!mapRef.current) return;
-    const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
-    if (!API_KEY) {
-      console.warn("[AirportExplorer] No VITE_GOOGLE_MAPS_API_KEY — showing error");
-      setMapStatus("error");
-      return;
-    }
+    if (!mapContainerRef.current) return;
 
     let cancelled = false;
 
-    async function init() {
-      try {
-        if (!explorerCachedLibs) {
-          console.log("[AirportExplorer] Loading Google Maps libraries...");
-          setOptions({ key: API_KEY, v: "weekly" });
-          const [mapsLib, markerLib] = await Promise.all([
-            withTimeout(importLibrary("maps"), 10000, "importLibrary(maps)"),
-            withTimeout(importLibrary("marker"), 10000, "importLibrary(marker)"),
-          ]);
-          if (cancelled) return;
-          explorerGoogle = (window as any).google;
-          explorerCachedLibs = {
-            Map: mapsLib.Map,
-            AdvancedMarkerElement: markerLib.AdvancedMarkerElement,
-          };
-          console.log("[AirportExplorer] Google Maps libraries loaded");
-        }
+    try {
+      const map = new maplibregl.Map({
+        container: mapContainerRef.current,
+        style: "https://tiles.openfreemap.org/styles/liberty",
+        center: [longitude, latitude],
+        zoom: 13,
+        pitchWithRotate: false,
+        dragRotate: false,
+        touchZoomRotate: false,
+        maxPitch: 0,
+      });
 
-        if (!mapRef.current || cancelled) return;
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 
-        console.log("[AirportExplorer] Creating map for", iata, "at", latitude, longitude);
-        const map = new explorerCachedLibs.Map(mapRef.current, {
-          center: { lat: latitude, lng: longitude },
-          zoom: 13,
-          mapId: "DEMO_MAP_ID",
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: false,
-          zoomControl: true,
-        });
+      const markerEl = document.createElement("div");
+      markerEl.style.cssText = "display:flex;align-items:center;justify-content:center;";
+      markerEl.innerHTML = `<div style="background:#38bdf8;color:#0f172a;border-radius:9999px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:9px;letter-spacing:0.5px;box-shadow:0 0 12px rgba(56,189,248,0.5);border:2px solid #fff;">${iata}</div>`;
 
-        const pin = document.createElement("div");
-        pin.style.cssText = "display:flex;align-items:center;justify-content:center;";
-        pin.innerHTML = `<div style="background:#38bdf8;color:#0f172a;border-radius:9999px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:9px;letter-spacing:0.5px;box-shadow:0 0 12px rgba(56,189,248,0.5);border:2px solid #fff;">${iata}</div>`;
+      const marker = new maplibregl.Marker({ element: markerEl })
+        .setLngLat([longitude, latitude])
+        .addTo(map);
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        new explorerCachedLibs.AdvancedMarkerElement({
-          position: { lat: latitude, lng: longitude },
-          map,
-          title: iata,
-          content: pin,
-        });
+      map.on("load", () => {
+        if (cancelled) return;
+        mapRef.current = map;
+        markerRef.current = marker;
+        console.log("[AirportExplorer] MapLibre map ready for", iata);
+        setMapStatus("ready");
+      });
 
-        if (!cancelled) {
-          mapInstanceRef.current = map;
-          console.log("[AirportExplorer] Map ready for", iata);
-          setMapStatus("ready");
-        }
-      } catch (err) {
-        console.error("[AirportExplorer] Map init failed:", err);
-        if (!cancelled) {
-          setMapStatus("error");
-        }
-      }
+      map.on("error", (e: maplibregl.ErrorEvent) => {
+        console.error("[AirportExplorer] MapLibre error:", e.error?.message ?? e);
+        if (!cancelled) setMapStatus("error");
+      });
+    } catch (err) {
+      console.error("[AirportExplorer] MapLibre init failed:", err);
+      if (!cancelled) setMapStatus("error");
     }
 
-    init();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      markerRef.current?.remove();
+      mapRef.current?.remove();
+      mapRef.current = null;
+      markerRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Re-center when coordinates change
   useEffect(() => {
-    if (mapStatus !== "ready" || !mapInstanceRef.current) return;
-    mapInstanceRef.current.setCenter({ lat: latitude, lng: longitude });
+    if (mapStatus !== "ready" || !mapRef.current) return;
+    mapRef.current.flyTo({ center: [longitude, latitude], zoom: 13, duration: 500 });
+    markerRef.current?.setLngLat([longitude, latitude]);
   }, [latitude, longitude, mapStatus]);
-
-  // Clear overlays
-  const clearOverlays = useCallback(() => {
-    overlaysRef.current.forEach((o) => { o.setMap(null); });
-    overlaysRef.current = [];
-  }, []);
 
   // Show category overlays on map
   useEffect(() => {
-    if (mapStatus !== "ready" || !mapInstanceRef.current || !data) return;
-    clearOverlays();
+    if (mapStatus !== "ready" || !mapRef.current || !data) return;
+    const map = mapRef.current;
+
+    // Clear previous overlays
+    for (const sid of overlaySourceIdsRef.current) {
+      if (map.getLayer(`overlay-fill-${sid}`)) map.removeLayer(`overlay-fill-${sid}`);
+      if (map.getLayer(`overlay-outline-${sid}`)) map.removeLayer(`overlay-outline-${sid}`);
+      if (map.getLayer(`overlay-line-${sid}`)) map.removeLayer(`overlay-line-${sid}`);
+      if (map.getLayer(`overlay-point-${sid}`)) map.removeLayer(`overlay-point-${sid}`);
+      if (map.getSource(sid)) map.removeSource(sid);
+    }
+    overlaySourceIdsRef.current = [];
 
     if (!activeCategory) return;
 
     const features = data[activeCategory] ?? [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const gmap = mapInstanceRef.current as any;
+    if (features.length === 0) return;
+
     const config = CATEGORY_CONFIG[activeCategory];
+    const geojson = featuresToGeoJSON(features);
+    const sourceId = `overlay-${activeCategory}`;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const newOverlays: any[] = [];
+    map.addSource(sourceId, { type: "geojson", data: geojson });
+    overlaySourceIdsRef.current.push(sourceId);
 
-    const gmaps = explorerGoogle?.maps;
-    if (!gmaps) return;
+    const hasPolygons = geojson.features.some((f) => f.geometry.type === "Polygon");
+    const hasLines = geojson.features.some((f) => f.geometry.type === "LineString");
+    const hasPoints = geojson.features.some((f) => f.geometry.type === "Point");
 
-    const P = gmaps.Polygon;
-    const L = gmaps.Polyline;
-    const M = gmaps.Marker;
+    if (hasPolygons) {
+      map.addLayer({
+        id: `overlay-fill-${sourceId}`,
+        type: "fill",
+        source: sourceId,
+        filter: ["==", "$type", "Polygon"],
+        paint: { "fill-color": config.color, "fill-opacity": 0.15 },
+      });
+      map.addLayer({
+        id: `overlay-outline-${sourceId}`,
+        type: "line",
+        source: sourceId,
+        filter: ["==", "$type", "Polygon"],
+        paint: { "line-color": config.color, "line-width": 2, "line-opacity": 0.8 },
+      });
+    }
 
+    if (hasLines) {
+      map.addLayer({
+        id: `overlay-line-${sourceId}`,
+        type: "line",
+        source: sourceId,
+        filter: ["==", "$type", "LineString"],
+        paint: {
+          "line-color": config.color,
+          "line-width": activeCategory === "runways" ? 4 : 2,
+          "line-opacity": 0.9,
+        },
+      });
+    }
+
+    if (hasPoints) {
+      map.addLayer({
+        id: `overlay-point-${sourceId}`,
+        type: "circle",
+        source: sourceId,
+        filter: ["==", "$type", "Point"],
+        paint: {
+          "circle-radius": 5,
+          "circle-color": config.color,
+          "circle-stroke-color": "#fff",
+          "circle-stroke-width": 1,
+          "circle-opacity": 0.8,
+        },
+      });
+    }
+
+    // Fit bounds to features
+    const bounds = new maplibregl.LngLatBounds();
+    let hasBounds = false;
     for (const f of features) {
-      if (f.geometry && f.geometry.length > 0 && f.geometry[0].length > 0) {
-        const path = f.geometry[0].map((c: number[]) => ({ lat: c[0], lng: c[1] }));
-
-        if (path.length >= 3 && P) {
-          const polygon = new P({
-            paths: path,
-            strokeColor: config.color,
-            strokeOpacity: 0.8,
-            strokeWeight: 2,
-            fillColor: config.color,
-            fillOpacity: 0.15,
-            map: gmap,
-          });
-          newOverlays.push(polygon);
-        } else if (path.length >= 2 && L) {
-          const polyline = new L({
-            path,
-            strokeColor: config.color,
-            strokeOpacity: 0.9,
-            strokeWeight: activeCategory === "runways" ? 4 : 2,
-            map: gmap,
-          });
-          newOverlays.push(polyline);
+      if (f.geometry?.[0]?.length) {
+        for (const c of f.geometry[0]) {
+          bounds.extend([c[1], c[0]]);
+          hasBounds = true;
         }
-      } else if (M) {
-        const marker = new M({
-          position: { lat: f.latitude, lng: f.longitude },
-          map: gmap,
-          title: f.name || f.ref || f.id,
-        });
-        newOverlays.push(marker);
+      } else {
+        bounds.extend([f.longitude, f.latitude]);
+        hasBounds = true;
+      }
+    }
+    if (hasBounds) {
+      map.fitBounds(bounds, { padding: 40, maxZoom: 16 });
+    }
+  }, [activeCategory, data, mapStatus]);
+
+  // Click interaction on overlay features
+  useEffect(() => {
+    if (mapStatus !== "ready" || !mapRef.current) return;
+    const map = mapRef.current;
+
+    const onClick = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+      const feat = e.features?.[0];
+      if (!feat) return;
+      const props = feat.properties as Record<string, unknown>;
+
+      // Find matching GeoFeature from data
+      if (activeCategory && data) {
+        const features = data[activeCategory] ?? [];
+        const match = features.find((f) => f.id === props.id);
+        if (match) {
+          setSelectedFeature(match);
+        }
+      }
+    };
+
+    // Attach to all overlay layers
+    const layerIds: string[] = [];
+    for (const sid of overlaySourceIdsRef.current) {
+      for (const suffix of ["overlay-fill", "overlay-outline", "overlay-line", "overlay-point"]) {
+        const lid = `${suffix}-${sid}`;
+        if (map.getLayer(lid)) {
+          map.on("click", lid, onClick);
+          layerIds.push(lid);
+        }
       }
     }
 
-    overlaysRef.current = newOverlays;
-
-    if (features.length > 0 && gmaps.LatLngBounds) {
-      const bounds = new gmaps.LatLngBounds();
-      for (const f of features) {
-        if (f.geometry?.[0]?.length) {
-          for (const c of f.geometry[0]) {
-            bounds.extend({ lat: c[0], lng: c[1] });
-          }
-        } else {
-          bounds.extend({ lat: f.latitude, lng: f.longitude });
-        }
-      }
-      gmap.fitBounds(bounds, 40);
+    // Change cursor on hover
+    const onEnter = () => { map.getCanvas().style.cursor = "pointer"; };
+    const onLeave = () => { map.getCanvas().style.cursor = ""; };
+    for (const lid of layerIds) {
+      map.on("mouseenter", lid, onEnter);
+      map.on("mouseleave", lid, onLeave);
     }
-  }, [activeCategory, data, mapStatus, clearOverlays]);
+
+    return () => {
+      for (const lid of layerIds) {
+        map.off("click", lid, onClick);
+        map.off("mouseenter", lid, onEnter);
+        map.off("mouseleave", lid, onLeave);
+      }
+    };
+  }, [mapStatus, activeCategory, data]);
 
   // Focus on selected feature
   useEffect(() => {
-    if (mapStatus !== "ready" || !mapInstanceRef.current || !selectedFeature) return;
-    const gmap = mapInstanceRef.current;
-    gmap.setCenter({ lat: selectedFeature.latitude, lng: selectedFeature.longitude });
-    gmap.setZoom(16);
+    if (mapStatus !== "ready" || !mapRef.current || !selectedFeature) return;
+    mapRef.current.flyTo({
+      center: [selectedFeature.longitude, selectedFeature.latitude],
+      zoom: 16,
+      duration: 500,
+    });
   }, [selectedFeature, mapStatus]);
 
   const handleResetView = () => {
     setSelectedFeature(null);
     setActiveCategory(null);
-    clearOverlays();
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.setCenter({ lat: latitude, lng: longitude });
-      mapInstanceRef.current.setZoom(13);
+    if (mapRef.current) {
+      for (const sid of overlaySourceIdsRef.current) {
+        for (const suffix of ["overlay-fill", "overlay-outline", "overlay-line", "overlay-point"]) {
+          const lid = `${suffix}-${sid}`;
+          if (mapRef.current.getLayer(lid)) mapRef.current.removeLayer(lid);
+        }
+        if (mapRef.current.getSource(sid)) mapRef.current.removeSource(sid);
+      }
+      overlaySourceIdsRef.current = [];
+      mapRef.current.flyTo({ center: [longitude, latitude], zoom: 13, duration: 500 });
     }
   };
 
@@ -319,11 +392,16 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
             <div className="text-center space-y-2">
               <AlertCircle className="size-5 text-white/30 mx-auto" />
               <p className="text-xs text-muted-foreground">Map unavailable</p>
-              <p className="text-[10px] text-muted-foreground/60">Check Google Maps API key configuration</p>
+              <p className="text-[10px] text-muted-foreground/60">Could not load OpenFreeMap basemap</p>
             </div>
           </div>
         )}
-        <div ref={mapRef} className="h-full w-full" />
+        <div ref={mapContainerRef} className="h-full w-full" />
+        <div className="absolute bottom-1 right-2 z-20 pointer-events-none">
+          <span className="text-[9px] text-white/30 font-mono">
+            &copy; OpenFreeMap &copy; OpenStreetMap contributors
+          </span>
+        </div>
       </div>
 
       {/* Feature list / detail panel */}
