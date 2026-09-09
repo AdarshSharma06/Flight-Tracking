@@ -94,19 +94,6 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
           streetViewControl: false,
           fullscreenControl: false,
           zoomControl: true,
-          styles: [
-            { elementType: "geometry", stylers: [{ color: "#0d1117" }] },
-            { elementType: "labels.text.fill", stylers: [{ color: "#8b949e" }] },
-            { elementType: "labels.text.stroke", stylers: [{ color: "#0d1117" }] },
-            { featureType: "water", elementType: "geometry", stylers: [{ color: "#0d1117" }] },
-            { featureType: "road", elementType: "geometry", stylers: [{ color: "#161b22" }] },
-            { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#8b949e" }] },
-            { featureType: "poi", elementType: "geometry", stylers: [{ color: "#161b22" }] },
-            { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#8b949e" }] },
-            { featureType: "transit", elementType: "geometry", stylers: [{ color: "#161b22" }] },
-            { featureType: "administrative", elementType: "geometry", stylers: [{ color: "#161b22" }] },
-            { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#0d1117" }] },
-          ],
         });
 
         const pin = document.createElement("div");
