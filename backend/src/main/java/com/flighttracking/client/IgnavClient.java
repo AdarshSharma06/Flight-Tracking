@@ -45,57 +45,24 @@ public class IgnavClient {
         if (req.market() != null) body.put("market", req.market());
         if (req.tripType() != null) body.put("trip_type", req.tripType());
 
-        // Try primary endpoint, fallback to alternative paths
-        String[] paths = {"/search", "/api/search", "/flights/search", "/v1/search"};
-        Exception last = null;
-        for (String p : paths) {
-            try {
-                log.debug("Calling Ignav search path={} body={}", p, body);
-                JsonNode resp = post(p, body);
-                if (resp != null) return resp;
-            } catch (Exception e) {
-                last = e;
-                log.warn("Ignav search failed on path {}: {}", p, e.getMessage());
-                // if 404, try next path
-                if (e.getMessage() != null && e.getMessage().contains("404")) continue;
-                throw e;
-            }
-        }
-        throw new ExternalApiException("Ignav search failed: " + (last != null ? last.getMessage() : "unknown"), last);
+        log.debug("Calling Ignav /fares/one-way body={}", body);
+        return post("/fares/one-way", body);
     }
 
     public JsonNode bookingLinks(IgnavBookingLinksRequest req) {
         ensureApiKey();
         Map<String, Object> body = new HashMap<>();
         body.put("ignav_id", req.ignavId());
-        // Some Ignav variants expect itinerary_id
-        body.put("itinerary_id", req.ignavId());
-        body.put("id", req.ignavId());
 
-        String[] paths = {"/booking-links", "/api/booking-links", "/flights/booking-links", "/booking/links"};
-        Exception last = null;
-        for (String p : paths) {
-            try {
-                log.debug("Calling Ignav booking-links path={} ignavId={}", p, req.ignavId());
-                JsonNode resp = post(p, body);
-                if (resp != null) return resp;
-            } catch (Exception e) {
-                last = e;
-                log.warn("Ignav booking-links failed on path {}: {}", p, e.getMessage());
-                if (e.getMessage() != null && e.getMessage().contains("404")) continue;
-                throw e;
-            }
-        }
-        throw new ExternalApiException("Ignav booking-links failed: " + (last != null ? last.getMessage() : "unknown"), last);
+        log.debug("Calling Ignav /fares/booking-links ignavId={}", req.ignavId());
+        return post("/fares/booking-links", body);
     }
 
     private JsonNode post(String path, Map<String, Object> body) {
         try {
             String json = restClient.post()
                     .uri(path)
-                    .header("x-api-key", properties.apiKey())
-                    .header("X-API-Key", properties.apiKey())
-                    .header("Authorization", "Bearer " + properties.apiKey())
+                    .header("X-Api-Key", properties.apiKey())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
