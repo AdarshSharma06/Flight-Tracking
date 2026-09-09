@@ -56,29 +56,31 @@ public class OverpassClient {
                 + "out skel qt;";
 
         try {
-            log.debug("Calling Overpass API (POST) for airport {}", iata);
+            log.info("Calling Overpass API (POST) for airport {} with bbox={}", iata, bbox);
+            log.debug("Overpass query for {}: {}", iata, query.substring(0, Math.min(query.length(), 200)));
 
             MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
             formData.add("data", query);
 
             OverpassResponse response = restClient.post()
+                    .uri("/api/interpreter")
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .body(formData)
                     .retrieve()
                     .body(OverpassResponse.class);
 
             if (response == null || response.elements == null) {
-                log.warn("Empty Overpass response for {}", iata);
+                log.warn("Empty Overpass response for {} (response={}, elements={})", iata, response, response != null ? response.elements : "null");
                 return emptyExplorer(iata);
             }
 
-            log.info("Overpass returned {} elements for {}", response.elements.size(), iata);
+            log.info("Overpass returned {} elements for {} — starting parse", response.elements.size(), iata);
             return parseResponse(iata, response);
         } catch (RestClientException e) {
-            log.error("Overpass API request failed for {}: {}", iata, e.getMessage());
+            log.error("Overpass API request failed for {}: {}", iata, e.getMessage(), e);
             return emptyExplorer(iata);
         } catch (Exception e) {
-            log.error("Failed to parse Overpass response for {}: {}", iata, e.getMessage());
+            log.error("Failed to parse Overpass response for {}: {}", iata, e.getMessage(), e);
             return emptyExplorer(iata);
         }
     }
