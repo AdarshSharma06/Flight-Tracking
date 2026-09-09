@@ -1,11 +1,13 @@
 package com.flighttracking.client;
 
-import com.flighttracking.config.OverpassProperties;
 import com.flighttracking.dto.airport.AirportExplorerDto;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -19,13 +21,17 @@ public class OverpassClient {
 
     private static final Logger log = LoggerFactory.getLogger(OverpassClient.class);
     private static final double BBOX_OFFSET = 0.025;
+    private static final ObjectMapper objectMapper = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private final RestClient primaryClient;
-    private final RestClient fallbackClient;
+    private final RestClient secondaryClient;
+    private final RestClient tertiaryClient;
 
-    public OverpassClient(RestClient overpassRestClient, RestClient overpassFallbackRestClient, OverpassProperties properties) {
+    public OverpassClient(RestClient overpassRestClient, RestClient overpassSecondaryRestClient, RestClient overpassFallbackRestClient) {
         this.primaryClient = overpassRestClient;
-        this.fallbackClient = overpassFallbackRestClient;
+        this.secondaryClient = overpassSecondaryRestClient;
+        this.tertiaryClient = overpassFallbackRestClient;
     }
 
     public AirportExplorerDto fetchAirportData(String iata, double latitude, double longitude) {
@@ -60,44 +66,64 @@ public class OverpassClient {
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
         formData.add("data", query);
 
-        // --- Primary endpoint ---
+        // --- Primary: overpass.private.coffee ---
         try {
             log.info("[PRIMARY] Overpass POST for {} via overpass.private.coffee — bbox={}", iata, bbox);
-            OverpassResponse response = callOverpass(primaryClient, formData);
-            return handleResponse(iata, response);
+            String raw = callOverpassRaw(primaryClient, formData);
+            return parseAndBuild(iata, raw, "PRIMARY");
         } catch (RestClientException e) {
-            log.warn("[PRIMARY FAILED] overpass.private.coffee failed for {}: {}", iata, e.getMessage());
+            log.warn("[PRIMARY FAILED] overpass.private.coffee for {}: {}", iata, e.getMessage());
+        } catch (Exception e) {
+            log.warn("[PRIMARY FAILED] overpass.private.coffee for {}: {}", iata, e.getMessage());
         }
 
-        // --- Fallback endpoint ---
+        // --- Secondary: maps.mail.ru ---
         try {
-            log.info("[FALLBACK] Overpass POST for {} via overpass-api.de — bbox={}", iata, bbox);
-            OverpassResponse response = callOverpass(fallbackClient, formData);
-            return handleResponse(iata, response);
+            log.info("[SECONDARY] Overpass POST for {} via maps.mail.ru — bbox={}", iata, bbox);
+            String raw = callOverpassRaw(secondaryClient, formData);
+            return parseAndBuild(iata, raw, "SECONDARY");
         } catch (RestClientException e) {
-            log.error("[FALLBACK FAILED] overpass-api.de also failed for {}: {}", iata, e.getMessage(), e);
+            log.warn("[SECONDARY FAILED] maps.mail.ru for {}: {}", iata, e.getMessage());
+        } catch (Exception e) {
+            log.warn("[SECONDARY FAILED] maps.mail.ru for {}: {}", iata, e.getMessage());
+        }
+
+        // --- Tertiary: overpass-api.de ---
+        try {
+            log.info("[TERTIARY] Overpass POST for {} via overpass-api.de — bbox={}", iata, bbox);
+            String raw = callOverpassRaw(tertiaryClient, formData);
+            return parseAndBuild(iata, raw, "TERTIARY");
+        } catch (RestClientException e) {
+            log.error("[TERTIARY FAILED] overpass-api.de for {}: {}", iata, e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("[TERTIARY FAILED] overpass-api.de for {}: {}", iata, e.getMessage(), e);
         }
 
         log.error("All Overpass endpoints failed for {} — returning empty explorer", iata);
         return emptyExplorer(iata);
     }
 
-    private OverpassResponse callOverpass(RestClient client, MultiValueMap<String, String> formData) {
-        return client.post()
+    private String callOverpassRaw(RestClient client, MultiValueMap<String, String> formData) {
+        ResponseEntity<String> response = client.post()
                 .uri("/api/interpreter")
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .body(formData)
                 .retrieve()
-                .body(OverpassResponse.class);
+                .toEntity(String.class);
+        if (response.getBody() == null || response.getBody().isBlank()) {
+            throw new RestClientException("Empty response body");
+        }
+        return response.getBody();
     }
 
-    private AirportExplorerDto handleResponse(String iata, OverpassResponse response) {
-        if (response == null || response.elements == null) {
-            log.warn("Empty Overpass response for {} (response={}, elements={})", iata, response, response != null ? response.elements : "null");
+    private AirportExplorerDto parseAndBuild(String iata, String rawBody, String tag) throws Exception {
+        log.info("[{}] Raw response length={} chars", tag, rawBody.length());
+        OverpassResponse response = objectMapper.readValue(rawBody, OverpassResponse.class);
+        if (response.elements == null) {
+            log.warn("[{}] Parsed response has null elements for {}", tag, iata);
             return emptyExplorer(iata);
         }
-
-        log.info("Overpass returned {} elements for {} — starting parse", response.elements.size(), iata);
+        log.info("[SUCCESS via {}] Parsed {} elements for {}", tag, response.elements.size(), iata);
         return parseResponse(iata, response);
     }
 

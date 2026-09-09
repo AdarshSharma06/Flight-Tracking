@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record OverpassProperties(
         String baseUrl,
         String fallbackUrl,
+        String fallbackUrl2,
         int timeoutMs
 ) {
 }

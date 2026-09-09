@@ -108,6 +108,21 @@ public class RestClientConfig {
         return builder
                 .clone()
                 .baseUrl(base)
+                .defaultHeader("User-Agent", "FlightTracking-AirportExplorer/1.0")
+                .requestFactory(factory)
+                .build();
+    }
+
+    @Bean
+    public RestClient overpassSecondaryRestClient(RestClient.Builder builder, OverpassProperties props) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(props.timeoutMs());
+        factory.setReadTimeout(props.timeoutMs());
+        String base = props.fallbackUrl() != null && !props.fallbackUrl().isBlank() ? props.fallbackUrl() : "https://maps.mail.ru/osm/tools/overpass";
+        return builder
+                .clone()
+                .baseUrl(base)
+                .defaultHeader("User-Agent", "FlightTracking-AirportExplorer/1.0")
                 .requestFactory(factory)
                 .build();
     }
@@ -117,10 +132,11 @@ public class RestClientConfig {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(props.timeoutMs());
         factory.setReadTimeout(props.timeoutMs());
-        String base = props.fallbackUrl() != null && !props.fallbackUrl().isBlank() ? props.fallbackUrl() : "https://overpass-api.de";
+        String base = props.fallbackUrl2() != null && !props.fallbackUrl2().isBlank() ? props.fallbackUrl2() : "https://overpass-api.de";
         return builder
                 .clone()
                 .baseUrl(base)
+                .defaultHeader("User-Agent", "FlightTracking-AirportExplorer/1.0")
                 .requestFactory(factory)
                 .build();
     }

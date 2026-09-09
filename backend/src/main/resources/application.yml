@@ -79,7 +79,8 @@ app:
     timeout-ms: ${GOOGLE_WEATHER_TIMEOUT_MS:5000}
   overpass:
     base-url: ${OVERPASS_BASE_URL:https://overpass.private.coffee}
-    fallback-url: ${OVERPASS_FALLBACK_URL:https://overpass-api.de}
+    fallback-url: ${OVERPASS_FALLBACK_URL:https://maps.mail.ru/osm/tools/overpass}
+    fallback-url-2: ${OVERPASS_FALLBACK_URL_2:https://overpass-api.de}
     timeout-ms: ${OVERPASS_TIMEOUT_MS:30000}
 
 # OpenAPI docs (springdoc) - available at /v3/api-docs and /swagger-ui.html
