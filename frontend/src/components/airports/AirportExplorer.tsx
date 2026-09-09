@@ -28,6 +28,16 @@ let explorerCachedLibs: any = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let explorerGoogle: any = null;
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 export function AirportExplorer({ data, loading, error, latitude, longitude, iata }: AirportExplorerProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,6 +58,7 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     if (!mapRef.current) return;
     const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
     if (!API_KEY) {
+      console.warn("[AirportExplorer] No VITE_GOOGLE_MAPS_API_KEY — showing error");
       setMapStatus("error");
       return;
     }
@@ -57,10 +68,11 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     async function init() {
       try {
         if (!explorerCachedLibs) {
+          console.log("[AirportExplorer] Loading Google Maps libraries...");
           setOptions({ key: API_KEY, v: "weekly" });
           const [mapsLib, markerLib] = await Promise.all([
-            importLibrary("maps"),
-            importLibrary("marker"),
+            withTimeout(importLibrary("maps"), 10000, "importLibrary(maps)"),
+            withTimeout(importLibrary("marker"), 10000, "importLibrary(marker)"),
           ]);
           if (cancelled) return;
           explorerGoogle = (window as any).google;
@@ -68,10 +80,12 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
             Map: mapsLib.Map,
             AdvancedMarkerElement: markerLib.AdvancedMarkerElement,
           };
+          console.log("[AirportExplorer] Google Maps libraries loaded");
         }
 
         if (!mapRef.current || cancelled) return;
 
+        console.log("[AirportExplorer] Creating map for", iata, "at", latitude, longitude);
         const map = new explorerCachedLibs.Map(mapRef.current, {
           center: { lat: latitude, lng: longitude },
           zoom: 13,
@@ -109,11 +123,12 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
 
         if (!cancelled) {
           mapInstanceRef.current = map;
+          console.log("[AirportExplorer] Map ready for", iata);
           setMapStatus("ready");
         }
       } catch (err) {
+        console.error("[AirportExplorer] Map init failed:", err);
         if (!cancelled) {
-          console.error("[AirportExplorer] Map init failed:", err);
           setMapStatus("error");
         }
       }
@@ -154,13 +169,16 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     const gmaps = explorerGoogle?.maps;
     if (!gmaps) return;
 
+    const P = gmaps.Polygon;
+    const L = gmaps.Polyline;
+    const M = gmaps.Marker;
+
     for (const f of features) {
       if (f.geometry && f.geometry.length > 0 && f.geometry[0].length > 0) {
-        const path = f.geometry[0].map((c) => ({ lat: c[0], lng: c[1] }));
+        const path = f.geometry[0].map((c: number[]) => ({ lat: c[0], lng: c[1] }));
 
-        if (path.length >= 3) {
-          // Polygon (terminal, building, parking)
-          const polygon = new gmaps.Polygon({
+        if (path.length >= 3 && P) {
+          const polygon = new P({
             paths: path,
             strokeColor: config.color,
             strokeOpacity: 0.8,
@@ -170,9 +188,8 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
             map: gmap,
           });
           newOverlays.push(polygon);
-        } else if (path.length === 2) {
-          // Polyline (runway, taxiway)
-          const polyline = new gmaps.Polyline({
+        } else if (path.length >= 2 && L) {
+          const polyline = new L({
             path,
             strokeColor: config.color,
             strokeOpacity: 0.9,
@@ -181,9 +198,8 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
           });
           newOverlays.push(polyline);
         }
-      } else {
-        // Point marker
-        const marker = new gmaps.Marker({
+      } else if (M) {
+        const marker = new M({
           position: { lat: f.latitude, lng: f.longitude },
           map: gmap,
           title: f.name || f.ref || f.id,
@@ -194,9 +210,8 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
 
     overlaysRef.current = newOverlays;
 
-    // Fit bounds to show all features
-    if (features.length > 0 && explorerGoogle?.maps) {
-      const bounds = new explorerGoogle.maps.LatLngBounds();
+    if (features.length > 0 && gmaps.LatLngBounds) {
+      const bounds = new gmaps.LatLngBounds();
       for (const f of features) {
         if (f.geometry?.[0]?.length) {
           for (const c of f.geometry[0]) {
@@ -314,7 +329,11 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
         )}
         {mapStatus === "error" && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0a0f1a]">
-            <p className="text-xs text-muted-foreground">Map unavailable</p>
+            <div className="text-center space-y-2">
+              <AlertCircle className="size-5 text-white/30 mx-auto" />
+              <p className="text-xs text-muted-foreground">Map unavailable</p>
+              <p className="text-[10px] text-muted-foreground/60">Check Google Maps API key configuration</p>
+            </div>
           </div>
         )}
         <div ref={mapRef} className="h-full w-full" />
