@@ -7,6 +7,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -35,12 +37,19 @@ public class OverpassClient {
                 + "(\n"
                 + "  way[\"aeroway\"=\"runway\"](" + bbox + ");\n"
                 + "  way[\"aeroway\"=\"taxiway\"](" + bbox + ");\n"
-                + "  way[\"building\"~\"terminal|aerodrome\"](" + bbox + ");\n"
+                + "  way[\"aeroway\"=\"terminal\"](" + bbox + ");\n"
+                + "  way[\"aeroway\"=\"gate\"](" + bbox + ");\n"
                 + "  node[\"aeroway\"=\"gate\"](" + bbox + ");\n"
+                + "  way[\"aeroway\"=\"parking_position\"](" + bbox + ");\n"
+                + "  node[\"aeroway\"=\"parking_position\"](" + bbox + ");\n"
+                + "  way[\"aeroway\"=\"apron\"](" + bbox + ");\n"
                 + "  way[\"amenity\"=\"parking\"](" + bbox + ");\n"
-                + "  node[\"railway\"~\"station|stop\"](" + bbox + ");\n"
+                + "  node[\"railway\"=\"station\"](" + bbox + ");\n"
+                + "  node[\"railway\"=\"stop\"](" + bbox + ");\n"
                 + "  node[\"highway\"=\"bus_stop\"](" + bbox + ");\n"
-                + "  node[\"amenity\"~\"restaurant|cafe|bar\"](" + bbox + ");\n"
+                + "  node[\"amenity\"=\"restaurant\"](" + bbox + ");\n"
+                + "  node[\"amenity\"=\"cafe\"](" + bbox + ");\n"
+                + "  node[\"amenity\"=\"bar\"](" + bbox + ");\n"
                 + ");\n"
                 + "out body;\n"
                 + ">;\n"
@@ -48,9 +57,13 @@ public class OverpassClient {
 
         try {
             log.debug("Calling Overpass API (POST) for airport {}", iata);
+
+            MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+            formData.add("data", query);
+
             OverpassResponse response = restClient.post()
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .body("data=" + query)
+                    .body(formData)
                     .retrieve()
                     .body(OverpassResponse.class);
 
@@ -99,7 +112,7 @@ public class OverpassClient {
 
             AirportExplorerDto.GeoFeature feature = null;
 
-            if ("way".equals(el.type) && el.nodes != null) {
+            if ("way".equals(el.type) && el.nodes != null && !el.nodes.isEmpty()) {
                 List<double[]> geometry = resolveWayGeometry(el.nodes, nodeMap);
                 if (geometry.isEmpty()) continue;
                 double[] center = computeCenter(geometry);
@@ -123,24 +136,35 @@ public class OverpassClient {
                         List.of(),
                         tags
                 );
+            } else if ("relation".equals(el.type) && el.members != null) {
+                // Skip relations — we only process nodes and ways from the flattened output
+                continue;
             }
 
             if (feature == null) continue;
 
             String cat = feature.category();
-            if ("runway".equals(cat)) runways.add(feature);
-            else if ("taxiway".equals(cat)) taxiways.add(feature);
-            else if ("terminal".equals(cat) || "aerodrome".equals(cat)) terminals.add(feature);
-            else if ("gate".equals(cat)) gates.add(feature);
-            else if ("parking".equals(cat)) parking.add(feature);
-            else if ("hotel".equals(cat) || "aerodrome".equals(building)) buildings.add(feature);
-            else if ("station".equals(cat) || "stop".equals(cat) || "bus_stop".equals(cat)) transport.add(feature);
-            else if ("restaurant".equals(cat) || "cafe".equals(cat) || "bar".equals(cat)
-                    || "duty_free".equals(cat) || "atm".equals(cat) || "bank".equals(cat)) amenities.add(feature);
+            switch (cat) {
+                case "runway" -> runways.add(feature);
+                case "taxiway" -> taxiways.add(feature);
+                case "terminal" -> terminals.add(feature);
+                case "gate" -> gates.add(feature);
+                case "parking_position", "parking" -> parking.add(feature);
+                case "apron" -> buildings.add(feature);
+                case "station", "stop", "bus_stop" -> transport.add(feature);
+                case "restaurant", "cafe", "bar", "duty_free", "atm", "bank" -> amenities.add(feature);
+                default -> {
+                    if ("hotel".equals(building) || "aerodrome".equals(building)) {
+                        buildings.add(feature);
+                    } else if (amenity != null) {
+                        amenities.add(feature);
+                    }
+                }
+            }
         }
 
-        log.info("Parsed DEL {}: runways={}, taxiways={}, terminals={}, gates={}, parking={}, transport={}, amenities={}",
-                iata, runways.size(), taxiways.size(), terminals.size(), gates.size(), parking.size(), transport.size(), amenities.size());
+        log.info("Parsed {}: runways={}, taxiways={}, terminals={}, buildings={}, gates={}, parking={}, transport={}, amenities={}",
+                iata, runways.size(), taxiways.size(), terminals.size(), buildings.size(), gates.size(), parking.size(), transport.size(), amenities.size());
 
         return new AirportExplorerDto(iata.toUpperCase(), runways, taxiways, terminals, buildings, gates, parking, transport, amenities);
     }
@@ -183,5 +207,6 @@ public class OverpassClient {
         public Double lon;
         public List<Long> nodes;
         public Map<String, String> tags;
+        public List<Object> members;
     }
 }

@@ -79,7 +79,7 @@ app:
     timeout-ms: ${GOOGLE_WEATHER_TIMEOUT_MS:5000}
   overpass:
     base-url: ${OVERPASS_BASE_URL:https://overpass-api.de}
-    timeout-ms: ${OVERPASS_TIMEOUT_MS:15000}
+    timeout-ms: ${OVERPASS_TIMEOUT_MS:30000}
 
 # OpenAPI docs (springdoc) - available at /v3/api-docs and /swagger-ui.html
 springdoc:
