@@ -65,6 +65,7 @@ export function AirportMap({ latitude, longitude, label, className = "" }: Airpo
         const map = new cachedLibs.Map(mapRef.current, {
           center,
           zoom: 13,
+          mapId: "DEMO_MAP_ID",
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
