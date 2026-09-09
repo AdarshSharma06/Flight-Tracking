@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
+import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
 
 interface AirportMapProps {
   latitude: number;
@@ -8,141 +9,133 @@ interface AirportMapProps {
   className?: string;
 }
 
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
+const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
 
-interface GoogleMapsWindow {
-  google?: {
-    maps?: {
-      Map: new (el: HTMLElement, opts: Record<string, unknown>) => Record<string, unknown>;
-      LatLng: new (lat: number, lng: number) => unknown;
-      Marker: new (opts: Record<string, unknown>) => Record<string, unknown>;
-      Animation: { DROP: unknown };
-    };
-  };
-  initGoogleMap?: () => void;
-}
+let mapsLoaded = false;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let cachedMap: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let cachedMarker: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let cachedMaps: any = null;
 
 export function AirportMap({ latitude, longitude, label, className = "" }: AirportMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mapInstanceRef = useRef<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const markerRef = useRef<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [errorMsg, setErrorMsg] = useState<string>("");
 
   useEffect(() => {
     if (!mapRef.current) return;
-    if (!GOOGLE_MAPS_API_KEY) {
-      setError(true);
-      setLoading(false);
+
+    if (!API_KEY) {
+      setStatus("error");
+      setErrorMsg("Google Maps API key not configured (VITE_GOOGLE_MAPS_API_KEY)");
       return;
     }
 
-    const w = window as unknown as GoogleMapsWindow;
-    if (w.google?.maps) {
-      initMap();
-      return;
-    }
+    let cancelled = false;
 
-    const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&callback=initGoogleMap`;
-    script.async = true;
-    script.defer = true;
-    w.initGoogleMap = () => {
-      initMap();
-    };
-    script.onerror = () => {
-      setError(true);
-      setLoading(false);
-    };
-    document.head.appendChild(script);
+    async function init() {
+      try {
+        if (!mapsLoaded) {
+          setOptions({
+            key: API_KEY,
+            v: "weekly",
+          });
+          // Load the core + marker libraries
+          const [mapsLib] = await Promise.all([
+            importLibrary("maps"),
+            importLibrary("marker"),
+          ]);
+          if (cancelled) return;
+          cachedMaps = mapsLib;
+          mapsLoaded = true;
+        }
 
-    return () => { /* cleanup */ };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+        if (!mapRef.current || cancelled) return;
 
-  useEffect(() => {
-    if (mapInstanceRef.current) {
-      const w = window as unknown as GoogleMapsWindow;
-      const maps = w.google?.maps;
-      if (maps) {
-        const center = new maps.LatLng(latitude, longitude);
-        mapInstanceRef.current.setCenter(center);
-        if (markerRef.current) {
-          markerRef.current.setPosition(center);
+        const center = new cachedMaps.LatLng(latitude, longitude);
+
+        // Destroy previous map if navigating between airports
+        if (cachedMap) {
+          cachedMap = null;
+          cachedMarker = null;
+        }
+
+        const map = new cachedMaps.Map(mapRef.current, {
+          center,
+          zoom: 13,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          zoomControl: true,
+          styles: [
+            { elementType: "geometry", stylers: [{ color: "#0d1117" }] },
+            { elementType: "labels.text.fill", stylers: [{ color: "#8b949e" }] },
+            { elementType: "labels.text.stroke", stylers: [{ color: "#0d1117" }] },
+            { featureType: "water", elementType: "geometry", stylers: [{ color: "#0d1117" }] },
+            { featureType: "road", elementType: "geometry", stylers: [{ color: "#161b22" }] },
+            { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#8b949e" }] },
+            { featureType: "poi", elementType: "geometry", stylers: [{ color: "#161b22" }] },
+            { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#8b949e" }] },
+            { featureType: "transit", elementType: "geometry", stylers: [{ color: "#161b22" }] },
+            { featureType: "administrative", elementType: "geometry", stylers: [{ color: "#161b22" }] },
+            { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#0d1117" }] },
+          ],
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const marker = new (window as any).google.maps.Marker({
+          position: center,
+          map,
+          title: label ?? "Airport",
+          animation: cachedMaps.Animation?.DROP,
+        });
+
+        if (!cancelled) {
+          cachedMap = map;
+          cachedMarker = marker;
+          setStatus("ready");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error("[AirportMap] Google Maps initialization failed:", err);
+          setStatus("error");
+          setErrorMsg(err instanceof Error ? err.message : "Failed to load Google Maps");
         }
       }
     }
-  }, [latitude, longitude]);
 
-  function initMap() {
-    if (!mapRef.current) {
-      setError(true);
-      setLoading(false);
-      return;
+    init();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Re-center map when coordinates change
+  useEffect(() => {
+    if (status !== "ready" || !cachedMap || !cachedMaps) return;
+
+    const center = new cachedMaps.LatLng(latitude, longitude);
+    cachedMap.setCenter(center);
+    if (cachedMarker) {
+      cachedMarker.setPosition(center);
     }
-    const w = window as unknown as GoogleMapsWindow;
-    const maps = w.google?.maps;
-    if (!maps) {
-      setError(true);
-      setLoading(false);
-      return;
-    }
+  }, [latitude, longitude, status]);
 
-    try {
-      const center = new maps.LatLng(latitude, longitude);
-      const map = new maps.Map(mapRef.current, {
-        center,
-        zoom: 13,
-        mapTypeControl: false,
-        streetViewControl: false,
-        fullscreenControl: false,
-        zoomControl: true,
-        styles: [
-          { elementType: "geometry", stylers: [{ color: "#0d1117" }] },
-          { elementType: "labels.text.fill", stylers: [{ color: "#8b949e" }] },
-          { elementType: "labels.text.stroke", stylers: [{ color: "#0d1117" }] },
-          { featureType: "water", elementType: "geometry", stylers: [{ color: "#0d1117" }] },
-          { featureType: "road", elementType: "geometry", stylers: [{ color: "#161b22" }] },
-          { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#8b949e" }] },
-          { featureType: "poi", elementType: "geometry", stylers: [{ color: "#161b22" }] },
-          { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#8b949e" }] },
-          { featureType: "transit", elementType: "geometry", stylers: [{ color: "#161b22" }] },
-          { featureType: "administrative", elementType: "geometry", stylers: [{ color: "#161b22" }] },
-          { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#0d1117" }] },
-        ],
-      });
-
-      const marker = new maps.Marker({
-        position: center,
-        map,
-        title: label ?? "Airport",
-        animation: maps.Animation.DROP,
-      });
-
-      mapInstanceRef.current = map;
-      markerRef.current = marker;
-      setLoading(false);
-    } catch {
-      setError(true);
-      setLoading(false);
-    }
-  }
-
-  if (error) {
+  if (status === "error") {
     return (
       <div className={`flex flex-col items-center justify-center gap-2 bg-white/[0.02] p-6 text-center ${className}`}>
         <AlertCircle className="size-6 text-white/20" />
         <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Map unavailable</p>
-        <p className="text-xs text-muted-foreground">Google Maps API key not configured</p>
+        <p className="text-xs text-muted-foreground">{errorMsg || "Could not load Google Maps"}</p>
       </div>
     );
   }
 
   return (
     <div className={`relative ${className}`}>
-      {loading && (
+      {status === "loading" && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0a0f1a]">
           <Loader2 className="size-6 animate-spin text-primary" />
         </div>
