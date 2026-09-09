@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import * as maplibregl from "maplibre-gl";
+import { Map as MapLibreMap, Marker, NavigationControl, LngLatBounds, setWorkerUrl } from "maplibre-gl";
+import type { MapMouseEvent, MapGeoJSONFeature, ErrorEvent } from "maplibre-gl";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - Vite ?worker&url import
+import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { AirportExplorerData, GeoFeature } from "@/types/api";
+
+setWorkerUrl(workerUrl as string);
 import { Loader2, AlertCircle, MapPin, PlaneTakeoff, Building2, Car, Coffee, ChevronRight, RotateCcw, Layers, X } from "lucide-react";
 
 interface AirportExplorerProps {
@@ -57,8 +63,8 @@ function featuresToGeoJSON(features: GeoFeature[]): GeoJSON.FeatureCollection {
 
 export function AirportExplorer({ data, loading, error, latitude, longitude, iata }: AirportExplorerProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
-  const markerRef = useRef<maplibregl.Marker | null>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const markerRef = useRef<Marker | null>(null);
   const overlaySourceIdsRef = useRef<string[]>([]);
   const [mapStatus, setMapStatus] = useState<"loading" | "ready" | "error">("loading");
   const [mapLoadTicks, setMapLoadTicks] = useState(0);
@@ -84,7 +90,7 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     if (!mapContainerRef.current) return;
 
     let cancelled = false;
-    let map: maplibregl.Map | null = null;
+    let map: MapLibreMap | null = null;
     let loadTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const onLoad = () => {
@@ -96,7 +102,7 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
       setMapStatus("ready");
     };
 
-    const onError = (e: maplibregl.ErrorEvent) => {
+    const onError = (e: ErrorEvent) => {
       console.error("[AirportExplorer] MapLibre error:", e.error?.message ?? e);
       if (!cancelled) setMapStatus("error");
     };
@@ -105,12 +111,12 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     markerEl.style.cssText = "display:flex;align-items:center;justify-content:center;";
     markerEl.innerHTML = `<div style="background:#38bdf8;color:#0f172a;border-radius:9999px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:9px;letter-spacing:0.5px;box-shadow:0 0 12px rgba(56,189,248,0.5);border:2px solid #fff;">${iata}</div>`;
 
-    const marker = new maplibregl.Marker({ element: markerEl })
+    const marker = new Marker({ element: markerEl })
       .setLngLat([longitude, latitude]);
 
     try {
       console.log("[AirportExplorer] Creating MapLibre map for", iata);
-      map = new maplibregl.Map({
+      map = new MapLibreMap({
         container: mapContainerRef.current,
         style: "https://tiles.openfreemap.org/styles/liberty",
         center: [longitude, latitude],
@@ -121,7 +127,7 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
         maxPitch: 0,
       });
 
-      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+      map.addControl(new NavigationControl({ showCompass: false }), "top-right");
       marker.addTo(map);
 
       map.on("load", onLoad);
@@ -236,7 +242,7 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     }
 
     // Fit bounds to features
-    const bounds = new maplibregl.LngLatBounds();
+    const bounds = new LngLatBounds();
     let hasBounds = false;
     for (const f of features) {
       if (f.geometry?.[0]?.length) {
@@ -259,7 +265,7 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     if (mapStatus !== "ready" || !mapRef.current) return;
     const map = mapRef.current;
 
-    const onClick = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+    const onClick = (e: MapMouseEvent & { features?: MapGeoJSONFeature[] }) => {
       const feat = e.features?.[0];
       if (!feat) return;
       const props = feat.properties as Record<string, unknown>;
