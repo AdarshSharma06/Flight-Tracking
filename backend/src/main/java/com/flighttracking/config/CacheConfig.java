@@ -16,6 +16,6 @@ public class CacheConfig {
         // No Redis/distributed infra. TTL handled via @Cacheable with manual eviction if needed.
         // Caches: airports, weather - stable external data, not user-specific.
         // Never cache: bookings, telemetry, auth.
-        return new ConcurrentMapCacheManager("airports", "weather");
+        return new ConcurrentMapCacheManager("airports", "weather", "airport-explorer");
     }
 }

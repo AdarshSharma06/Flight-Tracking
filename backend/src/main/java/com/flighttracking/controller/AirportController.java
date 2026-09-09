@@ -1,6 +1,7 @@
 package com.flighttracking.controller;
 
 import com.flighttracking.dto.airport.AirportDto;
+import com.flighttracking.dto.airport.AirportExplorerDto;
 import com.flighttracking.dto.flight.FlightDto;
 import com.flighttracking.service.AirportService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -38,6 +39,14 @@ public class AirportController {
     @GetMapping("/{iata}")
     public ResponseEntity<AirportDto> getAirport(@Pattern(regexp = "^[A-Za-z]{3}$", message = "IATA must be 3 letters") @PathVariable String iata) {
         AirportDto dto = airportService.getAirport(iata);
+        return ResponseEntity.ok(dto);
+    }
+
+    @Operation(summary = "Get airport explorer data (OSM infrastructure)", security = @SecurityRequirement(name = "bearerAuth"))
+    @GetMapping("/{iata}/explorer")
+    public ResponseEntity<AirportExplorerDto> getExplorer(
+            @Pattern(regexp = "^[A-Za-z]{3}$", message = "IATA must be 3 letters") @PathVariable String iata) {
+        AirportExplorerDto dto = airportService.getAirportExplorer(iata);
         return ResponseEntity.ok(dto);
     }
 

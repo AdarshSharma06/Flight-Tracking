@@ -1,7 +1,9 @@
 package com.flighttracking.service;
 
 import com.flighttracking.client.AirportClient;
+import com.flighttracking.client.OverpassClient;
 import com.flighttracking.dto.airport.AirportDto;
+import com.flighttracking.dto.airport.AirportExplorerDto;
 import com.flighttracking.dto.flight.FlightDto;
 import com.flighttracking.exception.ExternalApiException;
 import com.flighttracking.provider.FlightProvider;
@@ -19,10 +21,12 @@ public class AirportService {
 
     private final AirportClient airportClient;
     private final FlightProvider flightProvider;
+    private final OverpassClient overpassClient;
 
-    public AirportService(AirportClient airportClient, FlightProvider flightProvider) {
+    public AirportService(AirportClient airportClient, FlightProvider flightProvider, OverpassClient overpassClient) {
         this.airportClient = airportClient;
         this.flightProvider = flightProvider;
+        this.overpassClient = overpassClient;
     }
 
     @Cacheable(value = "airports", key = "#iata.toUpperCase()")
@@ -75,6 +79,17 @@ public class AirportService {
 
     public List<AirportDto> searchAirports(String query) {
         return airportClient.search(query);
+    }
+
+    @Cacheable(value = "airport-explorer", key = "#iata.toUpperCase()")
+    public AirportExplorerDto getAirportExplorer(String iata) {
+        validateIata(iata);
+        AirportDto airport = getAirport(iata);
+        if (airport.latitude() == null || airport.longitude() == null) {
+            log.warn("No coordinates for airport {} — returning empty explorer", iata);
+            return new AirportExplorerDto(iata.toUpperCase(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        }
+        return overpassClient.fetchAirportData(iata, airport.latitude(), airport.longitude());
     }
 
     private void validateIata(String iata) {
