@@ -78,7 +78,7 @@ public class RestClientConfig {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(props.timeoutMs());
         factory.setReadTimeout(props.timeoutMs());
-        String base = props.baseUrl() != null && !props.baseUrl().isBlank() ? props.baseUrl() : "https://api.ignav.com";
+        String base = props.baseUrl() != null && !props.baseUrl().isBlank() ? props.baseUrl() : "https://ignav.com/api";
         return builder
                 .clone()
                 .baseUrl(base)

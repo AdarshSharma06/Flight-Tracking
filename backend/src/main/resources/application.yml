@@ -71,7 +71,7 @@ app:
     api-key: ${AI_SERVICE_API_KEY:}
   ignav:
     api-key: ${IGNAV_API_KEY:}
-    base-url: ${IGNAV_BASE_URL:https://api.ignav.com}
+    base-url: ${IGNAV_BASE_URL:https://ignav.com/api}
     timeout-ms: ${IGNAV_TIMEOUT_MS:10000}
   google-weather:
     api-key: ${GOOGLE_WEATHER_API_KEY:}
