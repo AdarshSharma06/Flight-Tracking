@@ -115,6 +115,30 @@ export interface WeatherDto {
   observationTime: string | null;
 }
 
+// Backend: com.flighttracking.dto.airport.AirportExplorerDto
+export interface GeoFeature {
+  id: string;
+  category: string;
+  name: string;
+  ref: string;
+  latitude: number;
+  longitude: number;
+  geometry: number[][][];
+  properties: Record<string, string>;
+}
+
+export interface AirportExplorerData {
+  iata: string;
+  runways: GeoFeature[];
+  taxiways: GeoFeature[];
+  terminals: GeoFeature[];
+  buildings: GeoFeature[];
+  gates: GeoFeature[];
+  parking: GeoFeature[];
+  transport: GeoFeature[];
+  amenities: GeoFeature[];
+}
+
 // Backend: com.flighttracking.dto.booking.BookingResponse
 export interface BookingResponse {
   id: number;

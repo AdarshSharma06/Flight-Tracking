@@ -1,5 +1,5 @@
 import { Api } from "@/services/api";
-import type { AirportDto, FlightDto } from "@/types/api";
+import type { AirportDto, AirportExplorerData, FlightDto } from "@/types/api";
 
 export interface AirportFlightsResponse {
   airport: string;
@@ -22,5 +22,8 @@ export const airportService = {
   getArrivals(iata: string, limit?: number) {
     const q = limit ? `?limit=${limit}` : "";
     return Api.get<AirportFlightsResponse>(`/api/airports/${encodeURIComponent(iata.toUpperCase())}/arrivals${q}`);
+  },
+  getExplorer(iata: string) {
+    return Api.get<AirportExplorerData>(`/api/airports/${encodeURIComponent(iata.toUpperCase())}/explorer`);
   },
 };
