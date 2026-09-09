@@ -104,7 +104,20 @@ public class RestClientConfig {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(props.timeoutMs());
         factory.setReadTimeout(props.timeoutMs());
-        String base = props.baseUrl() != null && !props.baseUrl().isBlank() ? props.baseUrl() : "https://overpass-api.de";
+        String base = props.baseUrl() != null && !props.baseUrl().isBlank() ? props.baseUrl() : "https://overpass.private.coffee";
+        return builder
+                .clone()
+                .baseUrl(base)
+                .requestFactory(factory)
+                .build();
+    }
+
+    @Bean
+    public RestClient overpassFallbackRestClient(RestClient.Builder builder, OverpassProperties props) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(props.timeoutMs());
+        factory.setReadTimeout(props.timeoutMs());
+        String base = props.fallbackUrl() != null && !props.fallbackUrl().isBlank() ? props.fallbackUrl() : "https://overpass-api.de";
         return builder
                 .clone()
                 .baseUrl(base)

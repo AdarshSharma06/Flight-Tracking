@@ -20,10 +20,12 @@ public class OverpassClient {
     private static final Logger log = LoggerFactory.getLogger(OverpassClient.class);
     private static final double BBOX_OFFSET = 0.025;
 
-    private final RestClient restClient;
+    private final RestClient primaryClient;
+    private final RestClient fallbackClient;
 
-    public OverpassClient(RestClient overpassRestClient, OverpassProperties properties) {
-        this.restClient = overpassRestClient;
+    public OverpassClient(RestClient overpassRestClient, RestClient overpassFallbackRestClient, OverpassProperties properties) {
+        this.primaryClient = overpassRestClient;
+        this.fallbackClient = overpassFallbackRestClient;
     }
 
     public AirportExplorerDto fetchAirportData(String iata, double latitude, double longitude) {
@@ -55,34 +57,48 @@ public class OverpassClient {
                 + ">;\n"
                 + "out skel qt;";
 
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+        formData.add("data", query);
+
+        // --- Primary endpoint ---
         try {
-            log.info("Calling Overpass API (POST) for airport {} with bbox={}", iata, bbox);
-            log.debug("Overpass query for {}: {}", iata, query.substring(0, Math.min(query.length(), 200)));
-
-            MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
-            formData.add("data", query);
-
-            OverpassResponse response = restClient.post()
-                    .uri("/api/interpreter")
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .body(formData)
-                    .retrieve()
-                    .body(OverpassResponse.class);
-
-            if (response == null || response.elements == null) {
-                log.warn("Empty Overpass response for {} (response={}, elements={})", iata, response, response != null ? response.elements : "null");
-                return emptyExplorer(iata);
-            }
-
-            log.info("Overpass returned {} elements for {} — starting parse", response.elements.size(), iata);
-            return parseResponse(iata, response);
+            log.info("[PRIMARY] Overpass POST for {} via overpass.private.coffee — bbox={}", iata, bbox);
+            OverpassResponse response = callOverpass(primaryClient, formData);
+            return handleResponse(iata, response);
         } catch (RestClientException e) {
-            log.error("Overpass API request failed for {}: {}", iata, e.getMessage(), e);
-            return emptyExplorer(iata);
-        } catch (Exception e) {
-            log.error("Failed to parse Overpass response for {}: {}", iata, e.getMessage(), e);
+            log.warn("[PRIMARY FAILED] overpass.private.coffee failed for {}: {}", iata, e.getMessage());
+        }
+
+        // --- Fallback endpoint ---
+        try {
+            log.info("[FALLBACK] Overpass POST for {} via overpass-api.de — bbox={}", iata, bbox);
+            OverpassResponse response = callOverpass(fallbackClient, formData);
+            return handleResponse(iata, response);
+        } catch (RestClientException e) {
+            log.error("[FALLBACK FAILED] overpass-api.de also failed for {}: {}", iata, e.getMessage(), e);
+        }
+
+        log.error("All Overpass endpoints failed for {} — returning empty explorer", iata);
+        return emptyExplorer(iata);
+    }
+
+    private OverpassResponse callOverpass(RestClient client, MultiValueMap<String, String> formData) {
+        return client.post()
+                .uri("/api/interpreter")
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(formData)
+                .retrieve()
+                .body(OverpassResponse.class);
+    }
+
+    private AirportExplorerDto handleResponse(String iata, OverpassResponse response) {
+        if (response == null || response.elements == null) {
+            log.warn("Empty Overpass response for {} (response={}, elements={})", iata, response, response != null ? response.elements : "null");
             return emptyExplorer(iata);
         }
+
+        log.info("Overpass returned {} elements for {} — starting parse", response.elements.size(), iata);
+        return parseResponse(iata, response);
     }
 
     private AirportExplorerDto parseResponse(String iata, OverpassResponse response) {
@@ -139,7 +155,6 @@ public class OverpassClient {
                         tags
                 );
             } else if ("relation".equals(el.type) && el.members != null) {
-                // Skip relations — we only process nodes and ways from the flattened output
                 continue;
             }
 
