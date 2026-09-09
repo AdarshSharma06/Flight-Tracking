@@ -78,8 +78,9 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     return data[cat]?.length ?? 0;
   }, [data]);
 
-  // Initialize MapLibre map
+  // Initialize MapLibre map — depends on `loading` so it re-runs when the container becomes available
   useEffect(() => {
+    // Container doesn't exist while parent API is loading (early return in render)
     if (!mapContainerRef.current) return;
 
     let cancelled = false;
@@ -107,67 +108,47 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     const marker = new maplibregl.Marker({ element: markerEl })
       .setLngLat([longitude, latitude]);
 
-    // Retry up to 3 times if map container has no dimensions yet
-    const tryInit = (attempt: number) => {
-      if (cancelled) return;
-      const container = mapContainerRef.current;
-      if (!container) { if (!cancelled) setMapStatus("error"); return; }
+    try {
+      console.log("[AirportExplorer] Creating MapLibre map for", iata);
+      map = new maplibregl.Map({
+        container: mapContainerRef.current,
+        style: "https://tiles.openfreemap.org/styles/liberty",
+        center: [longitude, latitude],
+        zoom: 13,
+        pitchWithRotate: false,
+        dragRotate: false,
+        touchZoomRotate: false,
+        maxPitch: 0,
+      });
 
-      const rect = container.getBoundingClientRect();
-      if (rect.width < 10 || rect.height < 10) {
-        if (attempt < 3) {
-          console.log(`[AirportExplorer] Container not ready (attempt ${attempt + 1}), retrying in 200ms...`);
-          setTimeout(() => tryInit(attempt + 1), 200);
-          return;
-        }
-        console.warn("[AirportExplorer] Container still has no valid dimensions after retries, proceeding anyway");
-      }
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+      marker.addTo(map);
 
-      try {
-        console.log("[AirportExplorer] Creating MapLibre map for", iata);
-        map = new maplibregl.Map({
-          container,
-          style: "https://tiles.openfreemap.org/styles/liberty",
-          center: [longitude, latitude],
-          zoom: 13,
-          pitchWithRotate: false,
-          dragRotate: false,
-          touchZoomRotate: false,
-          maxPitch: 0,
-        });
+      map.on("load", onLoad);
+      map.on("error", onError);
 
-        map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-        marker.addTo(map);
-
-        map.on("load", onLoad);
-        map.on("error", onError);
-
-        // Safety timeout: if map never fires "load" within 15s, show error
-        loadTimeout = setTimeout(() => {
-          if (cancelled) return;
-          if (mapRef.current) return; // already loaded
-          console.warn("[AirportExplorer] MapLibre load timed out after 15s");
-          setMapStatus("error");
-        }, 15000);
-      } catch (err) {
-        console.error("[AirportExplorer] MapLibre init failed:", err);
-        if (!cancelled) setMapStatus("error");
-      }
-    };
-
-    // Use requestAnimationFrame to ensure layout is flushed before reading dimensions
-    requestAnimationFrame(() => tryInit(0));
+      // Safety timeout: if map never fires "load" within 15s, show error
+      loadTimeout = setTimeout(() => {
+        if (cancelled) return;
+        if (mapRef.current) return;
+        console.warn("[AirportExplorer] MapLibre load timed out after 15s");
+        setMapStatus("error");
+      }, 15000);
+    } catch (err) {
+      console.error("[AirportExplorer] MapLibre init failed:", err);
+      if (!cancelled) setMapStatus("error");
+    }
 
     return () => {
       cancelled = true;
       if (loadTimeout) clearTimeout(loadTimeout);
-      markerRef.current?.remove();
-      mapRef.current?.remove();
+      marker.remove();
+      map?.remove();
       mapRef.current = null;
       markerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapRetryKey]);
+  }, [loading, mapRetryKey]);
 
   // Re-center when coordinates change
   useEffect(() => {
