@@ -92,6 +92,7 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     let cancelled = false;
     let map: MapLibreMap | null = null;
     let loadTimeout: ReturnType<typeof setTimeout> | null = null;
+    let resizeObserver: ResizeObserver | null = null;
 
     const onLoad = () => {
       if (cancelled) return;
@@ -100,6 +101,11 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
       markerRef.current = marker;
       console.log("[AirportExplorer] MapLibre map loaded for", iata);
       setMapStatus("ready");
+      // Flex container may not have finalized layout at init time — force resize on next frame
+      requestAnimationFrame(() => {
+        if (cancelled || !map) return;
+        map.resize();
+      });
     };
 
     const onError = (e: ErrorEvent) => {
@@ -133,6 +139,14 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
       map.on("load", onLoad);
       map.on("error", onError);
 
+      // Keep MapLibre in sync with flex layout changes (container starts as flex-1 + min-h)
+      if (mapContainerRef.current) {
+        resizeObserver = new ResizeObserver(() => {
+          if (!cancelled) map?.resize();
+        });
+        resizeObserver.observe(mapContainerRef.current);
+      }
+
       // Safety timeout: if map never fires "load" within 15s, show error
       loadTimeout = setTimeout(() => {
         if (cancelled) return;
@@ -148,6 +162,7 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     return () => {
       cancelled = true;
       if (loadTimeout) clearTimeout(loadTimeout);
+      resizeObserver?.disconnect();
       marker.remove();
       map?.remove();
       mapRef.current = null;
