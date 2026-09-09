@@ -28,9 +28,17 @@ public class AirportService {
     @Cacheable(value = "airports", key = "#iata.toUpperCase()")
     public AirportDto getAirport(String iata) {
         validateIata(iata);
-        // Primary: AeroDataBox via provider abstraction
-        return flightProvider.getAirportByIata(iata)
-                .orElseGet(() -> airportClient.getByIata(iata));
+        // Primary: AeroDataBox via provider abstraction — fallback to local data on any provider failure
+        try {
+            return flightProvider.getAirportByIata(iata)
+                    .orElseGet(() -> airportClient.getByIata(iata));
+        } catch (ExternalApiException e) {
+            log.warn("AeroDataBox airport lookup failed for {}: {} — falling back to local data", iata, e.getMessage());
+            return airportClient.getByIata(iata);
+        } catch (Exception e) {
+            log.warn("Airport lookup failed for {}: {} — falling back to local data", iata, e.getMessage());
+            return airportClient.getByIata(iata);
+        }
     }
 
     public List<FlightDto> getDepartures(String iata, Integer limit) {
