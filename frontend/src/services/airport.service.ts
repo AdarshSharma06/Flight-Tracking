@@ -12,6 +12,9 @@ export const airportService = {
   getByIata(iata: string) {
     return Api.get<AirportDto>(`/api/airports/${encodeURIComponent(iata.toUpperCase())}`);
   },
+  search(query: string) {
+    return Api.get<AirportDto[]>(`/api/airports/search?q=${encodeURIComponent(query)}`);
+  },
   getDepartures(iata: string, limit?: number) {
     const q = limit ? `?limit=${limit}` : "";
     return Api.get<AirportFlightsResponse>(`/api/airports/${encodeURIComponent(iata.toUpperCase())}/departures${q}`);

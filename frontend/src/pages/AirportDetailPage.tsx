@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { airportService, type AirportFlightsResponse } from "@/services/airport.service";
 import { weatherService } from "@/services/weather.service";
+import { aiService } from "@/services/ai.service";
 import { ApiError } from "@/services/api";
 import type { AirportDto, FlightDto, WeatherDto } from "@/types/api";
-import { TrackingMap } from "@/components/tracking/TrackingMap";
-import { Loader2, ArrowLeft, PlaneTakeoff, PlaneLanding, Globe, Building2, MapPin, Thermometer, Wind, Droplets, AlertCircle, Clock } from "lucide-react";
+import { AirportMap } from "@/components/airports/AirportMap";
+import { Loader2, ArrowLeft, PlaneTakeoff, PlaneLanding, Globe, Building2, MapPin, Thermometer, Wind, Droplets, AlertCircle, Clock, Sparkles, Send, Bot, Map, Terminal } from "lucide-react";
 
 export function AirportDetailPage() {
   const { iata } = useParams<{ iata: string }>();
@@ -23,6 +24,13 @@ export function AirportDetailPage() {
   const [weather, setWeather] = useState<WeatherDto | null>(null);
   const [loadingWeather, setLoadingWeather] = useState(false);
   const [weatherError, setWeatherError] = useState<string | null>(null);
+
+  // AI assistant state
+  const [aiMessages, setAiMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiConversationId, setAiConversationId] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (!code || !/^[A-Z]{3}$/.test(code)) {
@@ -73,6 +81,29 @@ export function AirportDetailPage() {
       .finally(() => setLoadingWeather(false));
   }, [code]);
 
+  const handleAiSend = async () => {
+    const msg = aiInput.trim();
+    if (!msg || aiLoading) return;
+    setAiInput("");
+    setAiMessages((prev) => [...prev, { role: "user", content: msg }]);
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const contextMsg = code ? `[Airport context: ${code}] ${msg}` : msg;
+      const res = await aiService.chat(contextMsg, aiConversationId);
+      setAiConversationId(res.conversationId);
+      setAiMessages((prev) => [...prev, { role: "assistant", content: res.answer }]);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setAiError(e.status === 401 ? "Session expired. Please log in." : e.message);
+      } else {
+        setAiError("AI assistant unavailable.");
+      }
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   if (!code || !/^[A-Z]{3}$/.test(code)) {
     return (
       <div className="w-full min-h-[100dvh] pt-20 bg-background flex items-center justify-center p-6">
@@ -107,12 +138,11 @@ export function AirportDetailPage() {
   }
 
   const hasCoords = airport.latitude != null && airport.longitude != null;
-  const mapPoint = hasCoords ? { lat: airport.latitude as number, lng: airport.longitude as number, label: airport.iata, subLabel: airport.name } : null;
 
   return (
     <div className="w-full min-h-[100dvh] pt-20 pb-12 bg-background">
-      {/* Header / Breadcrumb - wide container 80-90% */}
-      <div className="w-[88%] max-w-[1600px] mx-auto px-2 lg:px-0 space-y-4">
+      <div className="w-[88%] max-w-[1600px] mx-auto px-2 lg:px-0 space-y-6">
+        {/* Breadcrumb */}
         <Link to="/airports" className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground hover:text-primary transition-colors">
           <ArrowLeft className="size-3" /> Airports
           <span className="text-white/20">/</span>
@@ -121,7 +151,7 @@ export function AirportDetailPage() {
 
         {/* Airport header + info/map grid */}
         <div className="grid grid-cols-1 lg:grid-cols-[42%_58%] gap-6 items-start">
-          {/* LEFT 42% — Airport Information */}
+          {/* LEFT — Airport Information */}
           <div className="glass-panel rounded-xl p-5 lg:p-6 space-y-5 min-w-0">
             <div className="space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
@@ -154,11 +184,16 @@ export function AirportDetailPage() {
             </div>
           </div>
 
-          {/* RIGHT 58% — Map */}
+          {/* RIGHT — Google Map */}
           <div className="glass-panel rounded-xl overflow-hidden border border-white/10 min-w-0">
             <div className="h-[320px] lg:h-[380px] w-full relative bg-[#0a0f1a]">
               {hasCoords ? (
-                <TrackingMap departure={mapPoint} className="h-full w-full" />
+                <AirportMap
+                  latitude={airport.latitude!}
+                  longitude={airport.longitude!}
+                  label={`${airport.iata} — ${airport.name}`}
+                  className="h-full w-full"
+                />
               ) : (
                 <div className="h-full w-full flex flex-col items-center justify-center gap-2 bg-white/[0.02] p-6 text-center">
                   <Building2 className="size-8 text-white/20" />
@@ -170,7 +205,7 @@ export function AirportDetailPage() {
             {hasCoords && (
               <div className="px-3 py-2 flex items-center justify-between border-t border-white/5 bg-white/[0.02]">
                 <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
-                  <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live position • {airport.iata}
+                  <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" /> Google Maps • {airport.iata}
                 </span>
                 <span className="text-[10px] font-mono text-muted-foreground">
                   {airport.latitude!.toFixed(3)}, {airport.longitude!.toFixed(3)}
@@ -180,7 +215,7 @@ export function AirportDetailPage() {
           </div>
         </div>
 
-        {/* Weather — full width, compact */}
+        {/* Weather */}
         <div className="glass-panel rounded-xl p-4 lg:p-5 space-y-3">
           <div className="flex items-center gap-2">
             <Thermometer className="size-4 text-primary" />
@@ -208,30 +243,9 @@ export function AirportDetailPage() {
 
           {!loadingWeather && !weatherError && weather && (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-1">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
-                  <Thermometer className="size-3" /> Temperature
-                </div>
-                <div className="text-lg font-mono font-semibold text-white leading-none">{weather.temperature}°C</div>
-                <div className="text-xs text-muted-foreground truncate">
-                  {weather.weatherCondition ?? "—"} {weather.weatherCode != null ? `(${weather.weatherCode})` : ""}
-                </div>
-                <div className="text-xs text-muted-foreground">Feels {weather.apparentTemperature ?? "—"}°C</div>
-              </div>
-              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-1">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
-                  <Wind className="size-3" /> Wind
-                </div>
-                <div className="text-lg font-mono font-semibold text-white leading-none">{weather.windSpeed ?? "—"} km/h</div>
-                <div className="text-xs text-muted-foreground">Precip {weather.precipitation ?? "—"} mm</div>
-              </div>
-              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-1">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
-                  <Droplets className="size-3" /> Humidity
-                </div>
-                <div className="text-lg font-mono font-semibold text-white leading-none">{weather.humidity ?? "—"}%</div>
-                <div className="text-xs text-muted-foreground">Timezone {weather.timezone ?? "—"}</div>
-              </div>
+              <WeatherCard icon={<Thermometer className="size-3" />} label="Temperature" value={`${weather.temperature}°C`} sub={`${weather.weatherCondition ?? "—"} ${weather.weatherCode != null ? `(${weather.weatherCode})` : ""}`} sub2={`Feels ${weather.apparentTemperature ?? "—"}°C`} />
+              <WeatherCard icon={<Wind className="size-3" />} label="Wind" value={`${weather.windSpeed ?? "—"} km/h`} sub={`Precip ${weather.precipitation ?? "—"} mm`} />
+              <WeatherCard icon={<Droplets className="size-3" />} label="Humidity" value={`${weather.humidity ?? "—"}%`} sub={`Timezone ${weather.timezone ?? "—"}`} />
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-1">
                 <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Observation</div>
                 <div className="text-xs font-mono text-white leading-tight truncate">{weather.observationTime ? new Date(weather.observationTime).toLocaleString() : "—"}</div>
@@ -245,57 +259,126 @@ export function AirportDetailPage() {
           )}
         </div>
 
-        {/* Departures & Arrivals — side-by-side, compact */}
+        {/* Departures & Arrivals */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-          <div className="glass-panel rounded-xl p-4 space-y-3 min-w-0">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs uppercase tracking-[0.16em] font-semibold text-white flex items-center gap-2">
-                <PlaneTakeoff className="size-3.5 text-primary" /> Departures {departures ? <span className="text-muted-foreground font-normal">({departures.count})</span> : null}
-              </h3>
-              <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground hidden sm:inline">10 flights</span>
+          <FlightPanel
+            title="Departures"
+            icon={<PlaneTakeoff className="size-3.5 text-primary" />}
+            flights={departures}
+            type="departure"
+            loading={loadingFlights}
+            error={flightsError}
+          />
+          <FlightPanel
+            title="Arrivals"
+            icon={<PlaneLanding className="size-3.5 text-primary" />}
+            flights={arrivals}
+            type="arrival"
+            loading={loadingFlights}
+            error={null}
+          />
+        </div>
+
+        {/* Airport Explorer — Phase 1 Foundation */}
+        <div className="glass-panel rounded-xl p-5 lg:p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Map className="size-4 text-primary" />
+            <h2 className="text-xs uppercase tracking-[0.16em] font-semibold text-white">Airport Explorer</h2>
+            <span className="px-1.5 py-0.5 rounded bg-primary/15 text-primary text-[9px] font-mono uppercase tracking-widest">Phase 1</span>
+          </div>
+          <p className="text-xs text-muted-foreground">Interactive airport terminal map and facilities — coming in Phase 2.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <ExplorerPlaceholder icon={<Terminal className="size-5" />} label="Terminals" />
+            <ExplorerPlaceholder icon={<MapPin className="size-5" />} label="Gates" />
+            <ExplorerPlaceholder icon={<Building2 className="size-5" />} label="Lounges" />
+            <ExplorerPlaceholder icon={<PlaneTakeoff className="size-5" />} label="Runways" />
+          </div>
+        </div>
+
+        {/* AI Assistant */}
+        <div className="glass-panel rounded-xl p-5 lg:p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Sparkles className="size-4 text-primary" />
+            <h2 className="text-xs uppercase tracking-[0.16em] font-semibold text-white">Airport Assistant</h2>
+          </div>
+          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+            <Bot className="size-3 text-primary" /> Ask about {code} — flights, weather, facilities, and more.
+          </p>
+
+          {/* Chat messages */}
+          {aiMessages.length > 0 && (
+            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+              {aiMessages.map((msg, idx) => (
+                <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed ${
+                    msg.role === "user"
+                      ? "bg-primary/20 text-white border border-primary/20"
+                      : "bg-white/[0.05] text-white/90 border border-white/10"
+                  }`}>
+                    {msg.role === "assistant" && (
+                      <div className="flex items-center gap-1 mb-1 text-[10px] text-primary font-semibold uppercase tracking-widest">
+                        <Bot className="size-3" /> Assistant
+                      </div>
+                    )}
+                    <div className="whitespace-pre-wrap">{msg.content}</div>
+                  </div>
+                </div>
+              ))}
+              {aiLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-white/[0.05] border border-white/10 rounded-lg px-3 py-2 flex items-center gap-2">
+                    <Loader2 className="size-3 animate-spin text-primary" />
+                    <span className="text-xs text-muted-foreground">Thinking...</span>
+                  </div>
+                </div>
+              )}
             </div>
-            {loadingFlights && (
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-9 rounded bg-white/5 animate-pulse" />
-                ))}
-              </div>
-            )}
-            {flightsError && (
-              <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 flex gap-2">
-                <AlertCircle className="size-4 text-destructive shrink-0" />
-                <span className="text-xs text-destructive">{flightsError}</span>
-              </div>
-            )}
-            {!loadingFlights && departures && departures.flights.length === 0 && (
-              <p className="text-xs text-muted-foreground py-8 text-center font-mono">No departures found.</p>
-            )}
-            {departures && departures.flights.length > 0 && (
-              <CompactFlightTable flights={departures.flights} type="departure" />
-            )}
+          )}
+
+          {aiError && (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 flex gap-2">
+              <AlertCircle className="size-3.5 text-destructive shrink-0 mt-0.5" />
+              <span className="text-xs text-destructive">{aiError}</span>
+            </div>
+          )}
+
+          {/* Input */}
+          <div className="flex gap-2">
+            <input
+              value={aiInput}
+              onChange={(e) => setAiInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleAiSend())}
+              placeholder={`Ask about ${code} airport...`}
+              disabled={aiLoading}
+              className="flex-1 h-9 rounded-lg border border-white/10 bg-white/[0.03] px-3 text-xs text-white placeholder:text-muted-foreground focus:border-primary/40 focus:ring-1 focus:ring-primary/30 outline-none disabled:opacity-50"
+            />
+            <button
+              onClick={handleAiSend}
+              disabled={aiLoading || !aiInput.trim()}
+              className="h-9 px-3 rounded-lg bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              <Send className="size-3.5" />
+            </button>
           </div>
 
-          <div className="glass-panel rounded-xl p-4 space-y-3 min-w-0">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs uppercase tracking-[0.16em] font-semibold text-white flex items-center gap-2">
-                <PlaneLanding className="size-3.5 text-primary" /> Arrivals {arrivals ? <span className="text-muted-foreground font-normal">({arrivals.count})</span> : null}
-              </h3>
-              <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground hidden sm:inline">10 flights</span>
+          {aiMessages.length === 0 && !aiLoading && (
+            <div className="flex flex-wrap gap-2">
+              {[
+                `What airlines fly from ${code}?`,
+                `Weather at ${code} right now?`,
+                `Best lounges at ${code}?`,
+                `Getting from ${code} to city center`,
+              ].map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => { setAiInput(prompt); }}
+                  className="text-[10px] px-2.5 py-1 rounded-lg border border-white/10 bg-white/[0.03] text-muted-foreground hover:text-white hover:border-white/20 transition-colors"
+                >
+                  {prompt}
+                </button>
+              ))}
             </div>
-            {loadingFlights && (
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-9 rounded bg-white/5 animate-pulse" />
-                ))}
-              </div>
-            )}
-            {!loadingFlights && arrivals && arrivals.flights.length === 0 && (
-              <p className="text-xs text-muted-foreground py-8 text-center font-mono">No arrivals found.</p>
-            )}
-            {arrivals && arrivals.flights.length > 0 && (
-              <CompactFlightTable flights={arrivals.flights} type="arrival" />
-            )}
-          </div>
+          )}
         </div>
       </div>
     </div>
@@ -308,6 +391,57 @@ function DataBlock({ label, value, mono, span }: { label: string; value: unknown
     <div className={span === 2 ? "col-span-2 space-y-1" : "space-y-1"}>
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</p>
       <p className={`text-xs truncate ${mono ? "font-mono text-white" : "text-white"}`}>{display}</p>
+    </div>
+  );
+}
+
+function WeatherCard({ icon, label, value, sub, sub2 }: { icon: React.ReactNode; label: string; value: string; sub?: string; sub2?: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-1">
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
+        {icon} {label}
+      </div>
+      <div className="text-lg font-mono font-semibold text-white leading-none">{value}</div>
+      {sub && <div className="text-xs text-muted-foreground truncate">{sub}</div>}
+      {sub2 && <div className="text-xs text-muted-foreground">{sub2}</div>}
+    </div>
+  );
+}
+
+function FlightPanel({ title, icon, flights, type, loading, error }: { title: string; icon: React.ReactNode; flights: AirportFlightsResponse | null; type: "departure" | "arrival"; loading: boolean; error: string | null }) {
+  return (
+    <div className="glass-panel rounded-xl p-4 space-y-3 min-w-0">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs uppercase tracking-[0.16em] font-semibold text-white flex items-center gap-2">
+          {icon} {title} {flights ? <span className="text-muted-foreground font-normal">({flights.count})</span> : null}
+        </h3>
+        <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground hidden sm:inline">10 flights</span>
+      </div>
+      {loading && (
+        <div className="space-y-2">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-9 rounded bg-white/5 animate-pulse" />
+          ))}
+        </div>
+      )}
+      {error && !loading && (
+        <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2.5 flex items-start gap-2">
+          <AlertCircle className="size-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <p className="text-xs font-semibold text-amber-400">Flight data temporarily unavailable</p>
+            <p className="text-xs text-muted-foreground line-clamp-2">{error}</p>
+          </div>
+        </div>
+      )}
+      {!loading && !error && flights && flights.flights.length === 0 && (
+        <p className="text-xs text-muted-foreground py-8 text-center font-mono">No {type === "departure" ? "departures" : "arrivals"} found.</p>
+      )}
+      {!loading && !error && flights && flights.flights.length > 0 && (
+        <CompactFlightTable flights={flights.flights} type={type} />
+      )}
+      {!loading && !error && !flights && (
+        <p className="text-xs text-muted-foreground py-8 text-center font-mono">Loading...</p>
+      )}
     </div>
   );
 }
@@ -370,6 +504,15 @@ function CompactFlightTable({ flights, type }: { flights: FlightDto[]; type: "de
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function ExplorerPlaceholder({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-white/10 bg-white/[0.02] p-4 flex flex-col items-center justify-center gap-2 opacity-50">
+      <div className="text-white/30">{icon}</div>
+      <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">{label}</span>
     </div>
   );
 }
