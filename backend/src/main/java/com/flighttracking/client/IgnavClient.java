@@ -40,10 +40,9 @@ public class IgnavClient {
             body.put("return_date", req.returnDate());
         }
         body.put("adults", req.adults() != null ? req.adults() : 1);
-        if (req.cabin() != null) body.put("cabin", req.cabin());
+        if (req.cabin() != null) body.put("cabin_class", req.cabin());
         if (req.maxStops() != null) body.put("max_stops", req.maxStops());
         if (req.market() != null) body.put("market", req.market());
-        if (req.tripType() != null) body.put("trip_type", req.tripType());
 
         log.debug("Calling Ignav /fares/one-way body={}", body);
         return post("/fares/one-way", body);
