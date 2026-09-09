@@ -7,7 +7,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 @Configuration
-@EnableConfigurationProperties({AviationStackProperties.class, AerodataboxProperties.class, OpenSkyProperties.class, OpenMeteoProperties.class, AirlabsProperties.class})
+@EnableConfigurationProperties({AviationStackProperties.class, AerodataboxProperties.class, OpenSkyProperties.class, OpenMeteoProperties.class, AirlabsProperties.class, IgnavProperties.class})
 public class RestClientConfig {
 
     @Bean
@@ -69,6 +69,19 @@ public class RestClientConfig {
         return builder
                 .clone()
                 .baseUrl(props.baseUrl())
+                .requestFactory(factory)
+                .build();
+    }
+
+    @Bean
+    public RestClient ignavRestClient(RestClient.Builder builder, IgnavProperties props) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(props.timeoutMs());
+        factory.setReadTimeout(props.timeoutMs());
+        String base = props.baseUrl() != null && !props.baseUrl().isBlank() ? props.baseUrl() : "https://api.ignav.com";
+        return builder
+                .clone()
+                .baseUrl(base)
                 .requestFactory(factory)
                 .build();
     }

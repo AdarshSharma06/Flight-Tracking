@@ -69,6 +69,10 @@ app:
     base-url: ${AI_SERVICE_BASE_URL:http://localhost:8001}
     timeout-ms: ${AI_SERVICE_TIMEOUT_MS:5000}
     api-key: ${AI_SERVICE_API_KEY:}
+  ignav:
+    api-key: ${IGNAV_API_KEY:}
+    base-url: ${IGNAV_BASE_URL:https://api.ignav.com}
+    timeout-ms: ${IGNAV_TIMEOUT_MS:10000}
 
 # OpenAPI docs (springdoc) - available at /v3/api-docs and /swagger-ui.html
 springdoc:

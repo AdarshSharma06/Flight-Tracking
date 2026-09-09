@@ -36,6 +36,40 @@ public class Booking {
     @Column(name = "aircraft_registration", length = 50)
     private String aircraftRegistration;
 
+    // Ignav-specific fields (nullable, for Booking page external flow)
+    @Column(name = "ignav_id", length = 64)
+    private String ignavId;
+
+    @Column(name = "price_amount")
+    private Double priceAmount;
+
+    @Column(name = "price_currency", length = 10)
+    private String priceCurrency;
+
+    @Column(name = "price_status", length = 20)
+    private String priceStatus;
+
+    @Column(name = "provider_name", length = 100)
+    private String providerName;
+
+    @Column(name = "provider_type", length = 30)
+    private String providerType;
+
+    @Column(name = "booking_url", columnDefinition = "TEXT")
+    private String bookingUrl;
+
+    @Column(name = "cabin", length = 30)
+    private String cabin;
+
+    @Column(name = "duration", length = 30)
+    private String duration;
+
+    @Column(name = "stops")
+    private Integer stops;
+
+    @Column(name = "ignav_legs_json", columnDefinition = "TEXT")
+    private String ignavLegsJson;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private BookingStatus status;
@@ -93,6 +127,28 @@ public class Booking {
     public void setAirlineName(String airlineName) { this.airlineName = airlineName; }
     public String getAircraftRegistration() { return aircraftRegistration; }
     public void setAircraftRegistration(String aircraftRegistration) { this.aircraftRegistration = aircraftRegistration; }
+    public String getIgnavId() { return ignavId; }
+    public void setIgnavId(String ignavId) { this.ignavId = ignavId; }
+    public Double getPriceAmount() { return priceAmount; }
+    public void setPriceAmount(Double priceAmount) { this.priceAmount = priceAmount; }
+    public String getPriceCurrency() { return priceCurrency; }
+    public void setPriceCurrency(String priceCurrency) { this.priceCurrency = priceCurrency; }
+    public String getPriceStatus() { return priceStatus; }
+    public void setPriceStatus(String priceStatus) { this.priceStatus = priceStatus; }
+    public String getProviderName() { return providerName; }
+    public void setProviderName(String providerName) { this.providerName = providerName; }
+    public String getProviderType() { return providerType; }
+    public void setProviderType(String providerType) { this.providerType = providerType; }
+    public String getBookingUrl() { return bookingUrl; }
+    public void setBookingUrl(String bookingUrl) { this.bookingUrl = bookingUrl; }
+    public String getCabin() { return cabin; }
+    public void setCabin(String cabin) { this.cabin = cabin; }
+    public String getDuration() { return duration; }
+    public void setDuration(String duration) { this.duration = duration; }
+    public Integer getStops() { return stops; }
+    public void setStops(Integer stops) { this.stops = stops; }
+    public String getIgnavLegsJson() { return ignavLegsJson; }
+    public void setIgnavLegsJson(String ignavLegsJson) { this.ignavLegsJson = ignavLegsJson; }
     public BookingStatus getStatus() { return status; }
     public void setStatus(BookingStatus status) { this.status = status; }
     public Instant getCreatedAt() { return createdAt; }

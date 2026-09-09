@@ -51,6 +51,20 @@ public class BookingService {
                 request.aircraftRegistration(),
                 BookingStatus.CONFIRMED
         );
+
+        // Persist Ignav-specific fields when provided
+        if (request.ignavId() != null) booking.setIgnavId(request.ignavId());
+        if (request.priceAmount() != null) booking.setPriceAmount(request.priceAmount());
+        if (request.priceCurrency() != null) booking.setPriceCurrency(request.priceCurrency());
+        if (request.priceStatus() != null) booking.setPriceStatus(request.priceStatus());
+        if (request.providerName() != null) booking.setProviderName(request.providerName());
+        if (request.providerType() != null) booking.setProviderType(request.providerType());
+        if (request.bookingUrl() != null) booking.setBookingUrl(request.bookingUrl());
+        if (request.cabin() != null) booking.setCabin(request.cabin());
+        if (request.duration() != null) booking.setDuration(request.duration());
+        if (request.stops() != null) booking.setStops(request.stops());
+        if (request.ignavLegsJson() != null) booking.setIgnavLegsJson(request.ignavLegsJson());
+
         booking = bookingRepository.save(booking);
         log.info("Booking created id={} for user={} flight={}", booking.getId(), username, booking.getFlightNumber());
         return toResponse(booking);
@@ -100,7 +114,17 @@ public class BookingService {
                 b.getAirlineName(),
                 b.getAircraftRegistration(),
                 b.getStatus().name(),
-                b.getCreatedAt()
+                b.getCreatedAt(),
+                b.getIgnavId(),
+                b.getPriceAmount(),
+                b.getPriceCurrency(),
+                b.getPriceStatus(),
+                b.getProviderName(),
+                b.getProviderType(),
+                b.getBookingUrl(),
+                b.getCabin(),
+                b.getDuration(),
+                b.getStops()
         );
     }
 
