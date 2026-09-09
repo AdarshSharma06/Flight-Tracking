@@ -61,8 +61,17 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
   const markerRef = useRef<maplibregl.Marker | null>(null);
   const overlaySourceIdsRef = useRef<string[]>([]);
   const [mapStatus, setMapStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [mapLoadTicks, setMapLoadTicks] = useState(0);
+  const [mapRetryKey, setMapRetryKey] = useState(0);
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
   const [selectedFeature, setSelectedFeature] = useState<GeoFeature | null>(null);
+
+  // Tick every second while map is loading so UI shows elapsed time
+  useEffect(() => {
+    if (mapStatus !== "loading") return;
+    const id = setInterval(() => setMapLoadTicks((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [mapStatus]);
 
   const getCategoryCount = useCallback((cat: Category): number => {
     if (!data) return 0;
@@ -74,55 +83,91 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
     if (!mapContainerRef.current) return;
 
     let cancelled = false;
+    let map: maplibregl.Map | null = null;
+    let loadTimeout: ReturnType<typeof setTimeout> | null = null;
 
-    try {
-      const map = new maplibregl.Map({
-        container: mapContainerRef.current,
-        style: "https://tiles.openfreemap.org/styles/liberty",
-        center: [longitude, latitude],
-        zoom: 13,
-        pitchWithRotate: false,
-        dragRotate: false,
-        touchZoomRotate: false,
-        maxPitch: 0,
-      });
+    const onLoad = () => {
+      if (cancelled) return;
+      if (loadTimeout) { clearTimeout(loadTimeout); loadTimeout = null; }
+      mapRef.current = map;
+      markerRef.current = marker;
+      console.log("[AirportExplorer] MapLibre map loaded for", iata);
+      setMapStatus("ready");
+    };
 
-      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-
-      const markerEl = document.createElement("div");
-      markerEl.style.cssText = "display:flex;align-items:center;justify-content:center;";
-      markerEl.innerHTML = `<div style="background:#38bdf8;color:#0f172a;border-radius:9999px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:9px;letter-spacing:0.5px;box-shadow:0 0 12px rgba(56,189,248,0.5);border:2px solid #fff;">${iata}</div>`;
-
-      const marker = new maplibregl.Marker({ element: markerEl })
-        .setLngLat([longitude, latitude])
-        .addTo(map);
-
-      map.on("load", () => {
-        if (cancelled) return;
-        mapRef.current = map;
-        markerRef.current = marker;
-        console.log("[AirportExplorer] MapLibre map ready for", iata);
-        setMapStatus("ready");
-      });
-
-      map.on("error", (e: maplibregl.ErrorEvent) => {
-        console.error("[AirportExplorer] MapLibre error:", e.error?.message ?? e);
-        if (!cancelled) setMapStatus("error");
-      });
-    } catch (err) {
-      console.error("[AirportExplorer] MapLibre init failed:", err);
+    const onError = (e: maplibregl.ErrorEvent) => {
+      console.error("[AirportExplorer] MapLibre error:", e.error?.message ?? e);
       if (!cancelled) setMapStatus("error");
-    }
+    };
+
+    const markerEl = document.createElement("div");
+    markerEl.style.cssText = "display:flex;align-items:center;justify-content:center;";
+    markerEl.innerHTML = `<div style="background:#38bdf8;color:#0f172a;border-radius:9999px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:9px;letter-spacing:0.5px;box-shadow:0 0 12px rgba(56,189,248,0.5);border:2px solid #fff;">${iata}</div>`;
+
+    const marker = new maplibregl.Marker({ element: markerEl })
+      .setLngLat([longitude, latitude]);
+
+    // Retry up to 3 times if map container has no dimensions yet
+    const tryInit = (attempt: number) => {
+      if (cancelled) return;
+      const container = mapContainerRef.current;
+      if (!container) { if (!cancelled) setMapStatus("error"); return; }
+
+      const rect = container.getBoundingClientRect();
+      if (rect.width < 10 || rect.height < 10) {
+        if (attempt < 3) {
+          console.log(`[AirportExplorer] Container not ready (attempt ${attempt + 1}), retrying in 200ms...`);
+          setTimeout(() => tryInit(attempt + 1), 200);
+          return;
+        }
+        console.warn("[AirportExplorer] Container still has no valid dimensions after retries, proceeding anyway");
+      }
+
+      try {
+        console.log("[AirportExplorer] Creating MapLibre map for", iata);
+        map = new maplibregl.Map({
+          container,
+          style: "https://tiles.openfreemap.org/styles/liberty",
+          center: [longitude, latitude],
+          zoom: 13,
+          pitchWithRotate: false,
+          dragRotate: false,
+          touchZoomRotate: false,
+          maxPitch: 0,
+        });
+
+        map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+        marker.addTo(map);
+
+        map.on("load", onLoad);
+        map.on("error", onError);
+
+        // Safety timeout: if map never fires "load" within 15s, show error
+        loadTimeout = setTimeout(() => {
+          if (cancelled) return;
+          if (mapRef.current) return; // already loaded
+          console.warn("[AirportExplorer] MapLibre load timed out after 15s");
+          setMapStatus("error");
+        }, 15000);
+      } catch (err) {
+        console.error("[AirportExplorer] MapLibre init failed:", err);
+        if (!cancelled) setMapStatus("error");
+      }
+    };
+
+    // Use requestAnimationFrame to ensure layout is flushed before reading dimensions
+    requestAnimationFrame(() => tryInit(0));
 
     return () => {
       cancelled = true;
+      if (loadTimeout) clearTimeout(loadTimeout);
       markerRef.current?.remove();
       mapRef.current?.remove();
       mapRef.current = null;
       markerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mapRetryKey]);
 
   // Re-center when coordinates change
   useEffect(() => {
@@ -384,15 +429,29 @@ export function AirportExplorer({ data, loading, error, latitude, longitude, iat
       <div className="relative flex-1 min-h-[300px]">
         {mapStatus === "loading" && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0a0f1a]">
-            <Loader2 className="size-5 animate-spin text-primary" />
+            <div className="text-center space-y-3">
+              <Loader2 className="size-5 animate-spin text-primary mx-auto" />
+              <p className="text-[10px] text-muted-foreground font-mono">Loading map...{mapLoadTicks > 0 ? ` ${mapLoadTicks}s` : ""}</p>
+              {mapLoadTicks >= 5 && (
+                <p className="text-[10px] text-muted-foreground/50">Taking longer than usual</p>
+              )}
+            </div>
           </div>
         )}
         {mapStatus === "error" && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0a0f1a]">
             <div className="text-center space-y-2">
               <AlertCircle className="size-5 text-white/30 mx-auto" />
-              <p className="text-xs text-muted-foreground">Map unavailable</p>
-              <p className="text-[10px] text-muted-foreground/60">Could not load OpenFreeMap basemap</p>
+              <p className="text-xs text-muted-foreground">Map failed to load</p>
+              <p className="text-[10px] text-muted-foreground/60 max-w-[260px]">
+                OpenFreeMap could not be loaded. The airport infrastructure data is available, but the basemap is unavailable.
+              </p>
+              <button
+                onClick={() => { setMapStatus("loading"); setMapLoadTicks(0); setMapRetryKey((k) => k + 1); }}
+                className="mt-1 text-[10px] text-primary hover:underline"
+              >
+                Retry
+              </button>
             </div>
           </div>
         )}
