@@ -3,7 +3,10 @@ package com.flighttracking.service;
 import com.flighttracking.client.AirportClient;
 import com.flighttracking.dto.airport.AirportDto;
 import com.flighttracking.dto.flight.FlightDto;
+import com.flighttracking.exception.ExternalApiException;
 import com.flighttracking.provider.FlightProvider;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
@@ -11,6 +14,8 @@ import java.util.List;
 
 @Service
 public class AirportService {
+
+    private static final Logger log = LoggerFactory.getLogger(AirportService.class);
 
     private final AirportClient airportClient;
     private final FlightProvider flightProvider;
@@ -33,7 +38,15 @@ public class AirportService {
         if (limit != null && (limit < 1 || limit > 100)) {
             throw new IllegalArgumentException("limit must be between 1 and 100");
         }
-        return flightProvider.getAirportDepartures(iata.toUpperCase(), limit);
+        try {
+            return flightProvider.getAirportDepartures(iata.toUpperCase(), limit);
+        } catch (ExternalApiException e) {
+            log.warn("AeroDataBox departures unavailable for {}: {} (returning empty list)", iata, e.getMessage());
+            return List.of();
+        } catch (Exception e) {
+            log.warn("Failed to fetch departures for {}: {} (returning empty list)", iata, e.getMessage());
+            return List.of();
+        }
     }
 
     public List<FlightDto> getArrivals(String iata, Integer limit) {
@@ -41,7 +54,19 @@ public class AirportService {
         if (limit != null && (limit < 1 || limit > 100)) {
             throw new IllegalArgumentException("limit must be between 1 and 100");
         }
-        return flightProvider.getAirportArrivals(iata.toUpperCase(), limit);
+        try {
+            return flightProvider.getAirportArrivals(iata.toUpperCase(), limit);
+        } catch (ExternalApiException e) {
+            log.warn("AeroDataBox arrivals unavailable for {}: {} (returning empty list)", iata, e.getMessage());
+            return List.of();
+        } catch (Exception e) {
+            log.warn("Failed to fetch arrivals for {}: {} (returning empty list)", iata, e.getMessage());
+            return List.of();
+        }
+    }
+
+    public List<AirportDto> searchAirports(String query) {
+        return airportClient.search(query);
     }
 
     private void validateIata(String iata) {

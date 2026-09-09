@@ -26,6 +26,14 @@ public class AirportController {
         this.airportService = airportService;
     }
 
+    @Operation(summary = "Search airports by IATA, ICAO, name, or city", security = @SecurityRequirement(name = "bearerAuth"))
+    @GetMapping("/search")
+    public ResponseEntity<List<AirportDto>> searchAirports(
+            @RequestParam String q) {
+        List<AirportDto> results = airportService.searchAirports(q);
+        return ResponseEntity.ok(results);
+    }
+
     @Operation(summary = "Get airport by IATA", security = @SecurityRequirement(name = "bearerAuth"))
     @GetMapping("/{iata}")
     public ResponseEntity<AirportDto> getAirport(@Pattern(regexp = "^[A-Za-z]{3}$", message = "IATA must be 3 letters") @PathVariable String iata) {

@@ -7,7 +7,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 @Configuration
-@EnableConfigurationProperties({AviationStackProperties.class, AerodataboxProperties.class, OpenSkyProperties.class, OpenMeteoProperties.class, AirlabsProperties.class, IgnavProperties.class})
+@EnableConfigurationProperties({AviationStackProperties.class, AerodataboxProperties.class, OpenSkyProperties.class, OpenMeteoProperties.class, AirlabsProperties.class, IgnavProperties.class, GoogleWeatherProperties.class})
 public class RestClientConfig {
 
     @Bean
@@ -78,7 +78,20 @@ public class RestClientConfig {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(props.timeoutMs());
         factory.setReadTimeout(props.timeoutMs());
-        String base = props.baseUrl() != null && !props.baseUrl().isBlank() ? props.baseUrl() : "https://ignav.com/api";
+        String base = props.baseUrl() != null && !props.baseUrl().isBlank() ? props.baseUrl() : "https://api.ignav.com";
+        return builder
+                .clone()
+                .baseUrl(base)
+                .requestFactory(factory)
+                .build();
+    }
+
+    @Bean
+    public RestClient googleWeatherRestClient(RestClient.Builder builder, GoogleWeatherProperties props) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(props.timeoutMs());
+        factory.setReadTimeout(props.timeoutMs());
+        String base = props.baseUrl() != null && !props.baseUrl().isBlank() ? props.baseUrl() : "https://weather.googleapis.com";
         return builder
                 .clone()
                 .baseUrl(base)
