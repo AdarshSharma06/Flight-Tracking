@@ -8,10 +8,13 @@ import com.flighttracking.dto.ignav.IgnavSearchRequest;
 import com.flighttracking.exception.ExternalApiException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.io.InputStream;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
@@ -60,19 +63,52 @@ public class IgnavClient {
 
     private JsonNode post(String path, Map<String, Object> body) {
         try {
-            byte[] bytes = restClient.post()
+            return restClient.post()
                     .uri(path)
                     .header("X-Api-Key", properties.apiKey())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
-                    .retrieve()
-                    .body(byte[].class);
-            if (bytes == null || bytes.length == 0) return objectMapper.createObjectNode();
-            String json = new String(bytes, StandardCharsets.UTF_8);
-            if (json.isBlank()) return objectMapper.createObjectNode();
-            return objectMapper.readTree(json);
+                    .exchange((request, response) -> {
+                        HttpStatusCode status = response.getStatusCode();
+                        MediaType contentType = response.getHeaders().getContentType();
+                        String contentTypeStr = contentType != null ? contentType.toString() : "unknown";
+                        Charset charset = contentType != null && contentType.getCharset() != null
+                                ? contentType.getCharset()
+                                : StandardCharsets.UTF_8;
+
+                        InputStream is = response.getBody();
+                        byte[] bytes = is != null ? is.readAllBytes() : new byte[0];
+                        log.debug("Ignav response status={} Content-Type={} bodyLength={} for {}", status, contentTypeStr, bytes.length, path);
+
+                        if (!status.is2xxSuccessful()) {
+                            String bodyStr = bytes.length > 0 ? new String(bytes, charset) : "";
+                            String truncated = bodyStr.length() > 500 ? bodyStr.substring(0, 500) + "..." : bodyStr;
+                            log.warn("Ignav non-2xx {} {} Content-Type={} body={}", path, status, contentTypeStr, truncated);
+                            throw new ExternalApiException("Ignav API error on " + path + ": HTTP " + status.value() + (truncated.isBlank() ? "" : " - " + truncated), status.value());
+                        }
+
+                        if (bytes.length == 0) {
+                            return objectMapper.createObjectNode();
+                        }
+
+                        String json = new String(bytes, charset);
+                        if (json.isBlank()) {
+                            return objectMapper.createObjectNode();
+                        }
+
+                        try {
+                            return objectMapper.readTree(json);
+                        } catch (Exception parseEx) {
+                            String truncated = json.length() > 500 ? json.substring(0, 500) + "..." : json;
+                            log.warn("Ignav response parse failed for {} Content-Type={} body={}: {}", path, contentTypeStr, truncated, parseEx.getMessage());
+                            throw new ExternalApiException("Ignav API error on " + path + ": invalid response format", parseEx);
+                        }
+                    });
+        } catch (ExternalApiException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("Ignav POST {} failed: {}", path, e.getMessage());
+            log.error("Ignav POST {} failed ({}): {}", path, e.getClass().getSimpleName(), e.getMessage());
+            log.debug("Ignav failure detail", e);
             throw new ExternalApiException("Ignav API error on " + path + ": " + e.getMessage(), e);
         }
     }
