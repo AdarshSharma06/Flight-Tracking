@@ -62,7 +62,7 @@ export function AircraftPage() {
     setNotFound(false);
   };
 
-  const handleFindSeat = () => {
+    const handleFindSeat = () => {
     if (!seatMap) return;
     const input = findSeatInput.trim();
     if (!input) {
@@ -82,7 +82,7 @@ export function AircraftPage() {
     setSelectedSeatId(info.id);
     setSeatFindError(null);
     const el = seatRefs.current[info.id];
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
   };
 
   const handleSeatClick = (seatId: string) => {
@@ -292,93 +292,76 @@ export function AircraftPage() {
 
             <Card className="overflow-hidden border-white/10">
               <CardContent className="pt-6">
-                <div className="flex flex-col items-center">
-                  <div className="flex flex-col items-center gap-1 mb-3">
-                    <span className="text-[11px] tracking-[0.2em] text-muted-foreground">FRONT</span>
-                    <span className="text-muted-foreground">↑</span>
+                <div className="flex flex-col items-center gap-3">
+                  <div className="flex items-center gap-2 text-[11px] tracking-[0.2em] text-muted-foreground">
+                    <span>FRONT</span>
+                    <span className="text-primary">→</span>
+                    <span className="hidden sm:inline">NOSE</span>
                   </div>
 
-                  <div className="w-full max-w-[360px] overflow-x-auto">
-                    <div className="min-w-[320px] mx-auto">
-                      {/* Column headers */}
-                      <div className="grid gap-1 mb-2" style={{ gridTemplateColumns: "32px repeat(3,1fr) 16px repeat(3,1fr)" }}>
-                        <div />
-                        {seatMap.letters.slice(0, 3).map((l) => (
-                          <div key={l} className="text-center text-[11px] font-mono text-muted-foreground">
-                            {l}
-                          </div>
-                        ))}
-                        <div />
-                        {seatMap.letters.slice(3).map((l) => (
-                          <div key={l} className="text-center text-[11px] font-mono text-muted-foreground">
-                            {l}
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Rows */}
-                      <div className="space-y-1">
-                        {Array.from({ length: seatMap.rows }, (_, idx) => {
-                          const row = idx + 1;
-                          return (
-                            <div key={row} className="grid gap-1 items-center" style={{ gridTemplateColumns: "32px repeat(3,1fr) 16px repeat(3,1fr)" }}>
-                              <div className="text-right pr-2 text-[11px] font-mono text-muted-foreground">{row}</div>
-                              {seatMap.letters.slice(0, 3).map((letter) => {
-                                const id = `${row}${letter}`;
-                                const isSelected = selectedSeatId === id;
-                                return (
-                                  <button
-                                    key={id}
-                                    ref={(el) => {
-                                      seatRefs.current[id] = el;
-                                    }}
-                                    onClick={() => handleSeatClick(id)}
-                                    className={`h-7 rounded-md border text-[11px] font-mono flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                                      isSelected
-                                        ? "bg-primary text-primary-foreground border-primary shadow"
-                                        : "bg-background hover:bg-muted border-white/10 text-foreground"
-                                    }`}
-                                    aria-label={`Seat ${id}`}
-                                  >
-                                    {letter}
-                                  </button>
-                                );
-                              })}
-                              <div className="flex justify-center">
-                                <div className="w-px h-6 bg-white/10" />
-                              </div>
-                              {seatMap.letters.slice(3).map((letter) => {
-                                const id = `${row}${letter}`;
-                                const isSelected = selectedSeatId === id;
-                                return (
-                                  <button
-                                    key={id}
-                                    ref={(el) => {
-                                      seatRefs.current[id] = el;
-                                    }}
-                                    onClick={() => handleSeatClick(id)}
-                                    className={`h-7 rounded-md border text-[11px] font-mono flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                                      isSelected
-                                        ? "bg-primary text-primary-foreground border-primary shadow"
-                                        : "bg-background hover:bg-muted border-white/10 text-foreground"
-                                    }`}
-                                    aria-label={`Seat ${id}`}
-                                  >
-                                    {letter}
-                                  </button>
-                                );
-                              })}
+                  <div className="w-full overflow-x-auto pb-2">
+                    <div className="flex gap-1.5 min-w-max mx-auto w-fit px-1">
+                      {Array.from({ length: seatMap.rows }, (_, idx) => {
+                        const row = idx + 1;
+                        return (
+                          <div key={row} className="flex flex-col items-center gap-1 shrink-0">
+                            <div className="text-[11px] font-mono text-muted-foreground h-4 flex items-center">{row}</div>
+                            {seatMap.letters.slice(0, 3).map((letter) => {
+                              const id = `${row}${letter}`;
+                              const isSelected = selectedSeatId === id;
+                              return (
+                                <button
+                                  key={id}
+                                  ref={(el) => {
+                                    seatRefs.current[id] = el;
+                                  }}
+                                  onClick={() => handleSeatClick(id)}
+                                  className={`size-7 sm:size-8 rounded-md border text-[11px] font-mono flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary shrink-0 ${
+                                    isSelected
+                                      ? "bg-primary text-primary-foreground border-primary shadow"
+                                      : "bg-background hover:bg-muted border-white/10 text-foreground"
+                                  }`}
+                                  aria-label={`Seat ${id}`}
+                                >
+                                  {letter}
+                                </button>
+                              );
+                            })}
+                            <div className="h-3 flex items-center justify-center">
+                              <div className="w-7 sm:w-8 h-px bg-white/10" />
                             </div>
-                          );
-                        })}
-                      </div>
-
-                      <div className="flex flex-col items-center gap-1 mt-4">
-                        <span className="text-muted-foreground">↓</span>
-                        <span className="text-[11px] tracking-[0.2em] text-muted-foreground">REAR</span>
-                      </div>
+                            {seatMap.letters.slice(3).map((letter) => {
+                              const id = `${row}${letter}`;
+                              const isSelected = selectedSeatId === id;
+                              return (
+                                <button
+                                  key={id}
+                                  ref={(el) => {
+                                    seatRefs.current[id] = el;
+                                  }}
+                                  onClick={() => handleSeatClick(id)}
+                                  className={`size-7 sm:size-8 rounded-md border text-[11px] font-mono flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary shrink-0 ${
+                                    isSelected
+                                      ? "bg-primary text-primary-foreground border-primary shadow"
+                                      : "bg-background hover:bg-muted border-white/10 text-foreground"
+                                  }`}
+                                  aria-label={`Seat ${id}`}
+                                >
+                                  {letter}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
+
+                  <div className="flex items-center gap-2 text-[11px] tracking-[0.2em] text-muted-foreground">
+                    <span className="text-primary">→</span>
+                    <span>REAR</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">Aisle between C and D • Scroll horizontally to see all rows</p>
                 </div>
               </CardContent>
             </Card>
