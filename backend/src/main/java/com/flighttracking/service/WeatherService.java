@@ -3,6 +3,7 @@ package com.flighttracking.service;
 import com.flighttracking.client.AirportClient;
 import com.flighttracking.client.GoogleWeatherClient;
 import com.flighttracking.client.OpenMeteoClient;
+import com.flighttracking.client.WeatherstackClient;
 import com.flighttracking.dto.airport.AirportDto;
 import com.flighttracking.dto.weather.WeatherDto;
 import com.flighttracking.exception.ExternalApiException;
@@ -18,11 +19,13 @@ public class WeatherService {
 
     private final GoogleWeatherClient googleWeatherClient;
     private final OpenMeteoClient openMeteoClient;
+    private final WeatherstackClient weatherstackClient;
     private final AirportClient airportClient;
 
-    public WeatherService(GoogleWeatherClient googleWeatherClient, OpenMeteoClient openMeteoClient, AirportClient airportClient) {
+    public WeatherService(GoogleWeatherClient googleWeatherClient, OpenMeteoClient openMeteoClient, WeatherstackClient weatherstackClient, AirportClient airportClient) {
         this.googleWeatherClient = googleWeatherClient;
         this.openMeteoClient = openMeteoClient;
+        this.weatherstackClient = weatherstackClient;
         this.airportClient = airportClient;
     }
 
@@ -63,9 +66,25 @@ public class WeatherService {
             log.debug("Open-Meteo succeeded for {},{}", latitude, longitude);
             return dto;
         } catch (Exception e) {
-            log.error("Open-Meteo weather also failed ({}): {}", e.getClass().getSimpleName(), e.getMessage());
+            log.warn("Open-Meteo failed ({}): {} — falling back to Weatherstack", e.getClass().getSimpleName(), e.getMessage());
             log.debug("Open-Meteo failure detail", e);
-            throw new ExternalApiException("Weather data unavailable from all providers", e);
         }
+
+        if (weatherstackClient.isConfigured()) {
+            log.debug("Attempting Weatherstack for {},{}", latitude, longitude);
+            try {
+                WeatherDto dto = weatherstackClient.getCurrentWeather(latitude, longitude);
+                log.debug("Weatherstack succeeded for {},{}", latitude, longitude);
+                return dto;
+            } catch (Exception e) {
+                log.error("Weatherstack also failed ({}): {}", e.getClass().getSimpleName(), e.getMessage());
+                log.debug("Weatherstack failure detail", e);
+            }
+        } else {
+            log.debug("Weatherstack not configured (WEATHERSTACK_API_KEY missing/blank), skipping");
+        }
+
+        log.error("Weather data unavailable from all providers for {},{}", latitude, longitude);
+        throw new ExternalApiException("Weather data unavailable from all providers", 502);
     }
 }

@@ -7,7 +7,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 @Configuration
-@EnableConfigurationProperties({AviationStackProperties.class, AerodataboxProperties.class, OpenSkyProperties.class, OpenMeteoProperties.class, AirlabsProperties.class, IgnavProperties.class, GoogleWeatherProperties.class, OverpassProperties.class})
+@EnableConfigurationProperties({AviationStackProperties.class, AerodataboxProperties.class, OpenSkyProperties.class, OpenMeteoProperties.class, AirlabsProperties.class, IgnavProperties.class, GoogleWeatherProperties.class, WeatherstackProperties.class, OverpassProperties.class})
 public class RestClientConfig {
 
     @Bean
@@ -92,6 +92,19 @@ public class RestClientConfig {
         factory.setConnectTimeout(props.timeoutMs());
         factory.setReadTimeout(props.timeoutMs());
         String base = props.baseUrl() != null && !props.baseUrl().isBlank() ? props.baseUrl() : "https://weather.googleapis.com";
+        return builder
+                .clone()
+                .baseUrl(base)
+                .requestFactory(factory)
+                .build();
+    }
+
+    @Bean
+    public RestClient weatherstackRestClient(RestClient.Builder builder, WeatherstackProperties props) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(props.timeoutMs());
+        factory.setReadTimeout(props.timeoutMs());
+        String base = props.baseUrl() != null && !props.baseUrl().isBlank() ? props.baseUrl() : "http://api.weatherstack.com";
         return builder
                 .clone()
                 .baseUrl(base)

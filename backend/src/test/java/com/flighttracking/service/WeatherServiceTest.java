@@ -3,6 +3,7 @@ package com.flighttracking.service;
 import com.flighttracking.client.AirportClient;
 import com.flighttracking.client.GoogleWeatherClient;
 import com.flighttracking.client.OpenMeteoClient;
+import com.flighttracking.client.WeatherstackClient;
 import com.flighttracking.dto.airport.AirportDto;
 import com.flighttracking.dto.weather.WeatherDto;
 import com.flighttracking.exception.ExternalApiException;
@@ -14,7 +15,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class WeatherServiceTest {
@@ -23,6 +24,8 @@ class WeatherServiceTest {
     GoogleWeatherClient googleWeatherClient;
     @Mock
     OpenMeteoClient openMeteoClient;
+    @Mock
+    WeatherstackClient weatherstackClient;
     @Mock
     AirportClient airportClient;
     @InjectMocks
@@ -36,6 +39,7 @@ class WeatherServiceTest {
         var res = service.getByCoordinates(28.5,77.1);
         assertThat(res.temperature()).isEqualTo(30.0);
         assertThat(res.weatherCondition()).isEqualTo("Mainly clear");
+        verify(weatherstackClient, never()).getCurrentWeather(anyDouble(), anyDouble());
     }
 
     @Test
@@ -65,6 +69,7 @@ class WeatherServiceTest {
     void getByCoordinatesExternalFailurePropagates() {
         when(googleWeatherClient.isConfigured()).thenReturn(false);
         when(openMeteoClient.getCurrentWeather(0,0)).thenThrow(new ExternalApiException("down",502));
+        when(weatherstackClient.isConfigured()).thenReturn(false);
         assertThatThrownBy(() -> service.getByCoordinates(0,0))
                 .isInstanceOf(ExternalApiException.class);
     }
@@ -76,6 +81,8 @@ class WeatherServiceTest {
         when(googleWeatherClient.getCurrentWeather(28.5,77.1)).thenReturn(dto);
         var res = service.getByCoordinates(28.5,77.1);
         assertThat(res.temperature()).isEqualTo(29.0);
+        verify(openMeteoClient, never()).getCurrentWeather(anyDouble(), anyDouble());
+        verify(weatherstackClient, never()).getCurrentWeather(anyDouble(), anyDouble());
     }
 
     @Test
@@ -86,6 +93,43 @@ class WeatherServiceTest {
         when(openMeteoClient.getCurrentWeather(28.5,77.1)).thenReturn(dto);
         var res = service.getByCoordinates(28.5,77.1);
         assertThat(res.temperature()).isEqualTo(30.0);
+        verify(weatherstackClient, never()).getCurrentWeather(anyDouble(), anyDouble());
+    }
+
+    @Test
+    void openMeteoFailureFallsBackToWeatherstack() {
+        when(googleWeatherClient.isConfigured()).thenReturn(true);
+        when(googleWeatherClient.getCurrentWeather(28.5,77.1)).thenThrow(new ExternalApiException("Google down",502));
+        when(openMeteoClient.getCurrentWeather(28.5,77.1)).thenThrow(new ExternalApiException("OpenMeteo down",502));
+        when(weatherstackClient.isConfigured()).thenReturn(true);
+        WeatherDto wsDto = new WeatherDto(28.5,77.1,"Asia/Kolkata",31.0,33.0,55.0,0.0,7.0,113,"Sunny","2026-09-01T10:00");
+        when(weatherstackClient.getCurrentWeather(28.5,77.1)).thenReturn(wsDto);
+        var res = service.getByCoordinates(28.5,77.1);
+        assertThat(res.temperature()).isEqualTo(31.0);
+        assertThat(res.weatherCondition()).isEqualTo("Sunny");
+    }
+
+    @Test
+    void allThreeProvidersFailThrows() {
+        when(googleWeatherClient.isConfigured()).thenReturn(true);
+        when(googleWeatherClient.getCurrentWeather(28.5,77.1)).thenThrow(new ExternalApiException("Google down",502));
+        when(openMeteoClient.getCurrentWeather(28.5,77.1)).thenThrow(new ExternalApiException("OpenMeteo down",502));
+        when(weatherstackClient.isConfigured()).thenReturn(true);
+        when(weatherstackClient.getCurrentWeather(28.5,77.1)).thenThrow(new ExternalApiException("Weatherstack down",502));
+        assertThatThrownBy(() -> service.getByCoordinates(28.5,77.1))
+                .isInstanceOf(ExternalApiException.class)
+                .hasMessageContaining("Weather data unavailable");
+    }
+
+    @Test
+    void weatherstackNotConfiguredIsSkipped() {
+        when(googleWeatherClient.isConfigured()).thenReturn(true);
+        when(googleWeatherClient.getCurrentWeather(28.5,77.1)).thenThrow(new ExternalApiException("Google down",502));
+        when(openMeteoClient.getCurrentWeather(28.5,77.1)).thenThrow(new ExternalApiException("OpenMeteo down",502));
+        when(weatherstackClient.isConfigured()).thenReturn(false);
+        assertThatThrownBy(() -> service.getByCoordinates(28.5,77.1))
+                .isInstanceOf(ExternalApiException.class);
+        verify(weatherstackClient, never()).getCurrentWeather(anyDouble(), anyDouble());
     }
 
     @Test

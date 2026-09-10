@@ -77,6 +77,10 @@ app:
     api-key: ${GOOGLE_WEATHER_API_KEY:}
     base-url: ${GOOGLE_WEATHER_BASE_URL:https://weather.googleapis.com}
     timeout-ms: ${GOOGLE_WEATHER_TIMEOUT_MS:5000}
+  weatherstack:
+    api-key: ${WEATHERSTACK_API_KEY:}
+    base-url: ${WEATHERSTACK_BASE_URL:http://api.weatherstack.com}
+    timeout-ms: ${WEATHERSTACK_TIMEOUT_MS:5000}
   overpass:
     base-url: ${OVERPASS_BASE_URL:https://overpass.private.coffee}
     fallback-url: ${OVERPASS_FALLBACK_URL:https://maps.mail.ru/osm/tools/overpass}
