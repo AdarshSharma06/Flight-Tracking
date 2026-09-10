@@ -12,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -59,14 +60,16 @@ public class IgnavClient {
 
     private JsonNode post(String path, Map<String, Object> body) {
         try {
-            String json = restClient.post()
+            byte[] bytes = restClient.post()
                     .uri(path)
                     .header("X-Api-Key", properties.apiKey())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
-                    .body(String.class);
-            if (json == null) return objectMapper.createObjectNode();
+                    .body(byte[].class);
+            if (bytes == null || bytes.length == 0) return objectMapper.createObjectNode();
+            String json = new String(bytes, StandardCharsets.UTF_8);
+            if (json.isBlank()) return objectMapper.createObjectNode();
             return objectMapper.readTree(json);
         } catch (Exception e) {
             log.error("Ignav POST {} failed: {}", path, e.getMessage());

@@ -43,20 +43,28 @@ public class WeatherService {
     }
 
     private WeatherDto fetchWeatherWithFallback(double latitude, double longitude) {
-        // Primary: Google Weather API (if configured)
         if (googleWeatherClient.isConfigured()) {
+            log.debug("Google Weather API is configured, attempting primary provider for {},{}", latitude, longitude);
             try {
-                return googleWeatherClient.getCurrentWeather(latitude, longitude);
+                WeatherDto dto = googleWeatherClient.getCurrentWeather(latitude, longitude);
+                log.debug("Google Weather succeeded for {},{}", latitude, longitude);
+                return dto;
             } catch (Exception e) {
-                log.warn("Google Weather API failed, falling back to Open-Meteo: {}", e.getMessage());
+                log.warn("Google Weather API failed ({}): {} — falling back to Open-Meteo", e.getClass().getSimpleName(), e.getMessage());
+                log.debug("Google Weather failure detail", e);
             }
+        } else {
+            log.debug("Google Weather API not configured (GOOGLE_WEATHER_API_KEY missing/blank), using Open-Meteo directly for {},{}", latitude, longitude);
         }
 
-        // Fallback: Open-Meteo (free, no key required)
+        log.debug("Attempting Open-Meteo for {},{}", latitude, longitude);
         try {
-            return openMeteoClient.getCurrentWeather(latitude, longitude);
+            WeatherDto dto = openMeteoClient.getCurrentWeather(latitude, longitude);
+            log.debug("Open-Meteo succeeded for {},{}", latitude, longitude);
+            return dto;
         } catch (Exception e) {
-            log.error("Open-Meteo weather also failed: {}", e.getMessage());
+            log.error("Open-Meteo weather also failed ({}): {}", e.getClass().getSimpleName(), e.getMessage());
+            log.debug("Open-Meteo failure detail", e);
             throw new ExternalApiException("Weather data unavailable from all providers", e);
         }
     }

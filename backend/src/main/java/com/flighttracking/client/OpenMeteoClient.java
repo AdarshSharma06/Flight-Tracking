@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
@@ -68,12 +69,17 @@ public class OpenMeteoClient {
                     condition,
                     response.current.time
             );
+        } catch (RestClientResponseException e) {
+            String body = e.getResponseBodyAsString();
+            log.warn("Open-Meteo HTTP {} for {},{}: {} — body: {}", e.getStatusCode(), latitude, longitude, e.getMessage(), body != null && body.length() > 500 ? body.substring(0, 500) : body);
+            throw new ExternalApiException("Open-Meteo HTTP " + e.getStatusCode().value() + ": " + e.getMessage(), e);
         } catch (ExternalApiException e) {
             throw e;
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (RestClientException e) {
-            log.error("Open-Meteo request failed: {}", e.getMessage());
+            log.error("Open-Meteo request failed for {},{} ({}): {}", latitude, longitude, e.getClass().getSimpleName(), e.getMessage());
+            log.debug("Open-Meteo failure detail", e);
             throw new ExternalApiException("Failed to fetch weather from Open-Meteo: " + e.getMessage(), e);
         }
     }

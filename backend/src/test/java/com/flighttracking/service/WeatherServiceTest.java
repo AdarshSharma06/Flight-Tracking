@@ -1,6 +1,7 @@
 package com.flighttracking.service;
 
 import com.flighttracking.client.AirportClient;
+import com.flighttracking.client.GoogleWeatherClient;
 import com.flighttracking.client.OpenMeteoClient;
 import com.flighttracking.dto.airport.AirportDto;
 import com.flighttracking.dto.weather.WeatherDto;
@@ -19,6 +20,8 @@ import static org.mockito.Mockito.when;
 class WeatherServiceTest {
 
     @Mock
+    GoogleWeatherClient googleWeatherClient;
+    @Mock
     OpenMeteoClient openMeteoClient;
     @Mock
     AirportClient airportClient;
@@ -27,6 +30,7 @@ class WeatherServiceTest {
 
     @Test
     void getByCoordinatesSuccess() {
+        when(googleWeatherClient.isConfigured()).thenReturn(false);
         WeatherDto dto = new WeatherDto(28.5,77.1,"Asia/Kolkata",30.0,32.0,65.0,0.0,5.0,1,"Mainly clear","2026-09-01T10:00");
         when(openMeteoClient.getCurrentWeather(28.5,77.1)).thenReturn(dto);
         var res = service.getByCoordinates(28.5,77.1);
@@ -36,6 +40,7 @@ class WeatherServiceTest {
 
     @Test
     void getByAirportSuccess() {
+        when(googleWeatherClient.isConfigured()).thenReturn(false);
         when(airportClient.getByIata("DEL")).thenReturn(new AirportDto("DEL","VIDP","IGI","New Delhi","India",28.5665,77.1031,"Asia/Kolkata","IN"));
         WeatherDto dto = new WeatherDto(28.5665,77.1031,"Asia/Kolkata",31.0,33.0,70.0,0.0,6.0,2,"Partly cloudy","2026-09-01T10:00");
         when(openMeteoClient.getCurrentWeather(28.5665,77.1031)).thenReturn(dto);
@@ -58,9 +63,29 @@ class WeatherServiceTest {
 
     @Test
     void getByCoordinatesExternalFailurePropagates() {
+        when(googleWeatherClient.isConfigured()).thenReturn(false);
         when(openMeteoClient.getCurrentWeather(0,0)).thenThrow(new ExternalApiException("down",502));
         assertThatThrownBy(() -> service.getByCoordinates(0,0))
                 .isInstanceOf(ExternalApiException.class);
+    }
+
+    @Test
+    void googlePrimarySuccess() {
+        WeatherDto dto = new WeatherDto(28.5,77.1,null,29.0,null,60.0,null,8.0,null,"Clear","2026-09-01T10:00");
+        when(googleWeatherClient.isConfigured()).thenReturn(true);
+        when(googleWeatherClient.getCurrentWeather(28.5,77.1)).thenReturn(dto);
+        var res = service.getByCoordinates(28.5,77.1);
+        assertThat(res.temperature()).isEqualTo(29.0);
+    }
+
+    @Test
+    void googleFailureFallsBackToOpenMeteo() {
+        when(googleWeatherClient.isConfigured()).thenReturn(true);
+        when(googleWeatherClient.getCurrentWeather(28.5,77.1)).thenThrow(new ExternalApiException("Google down",502));
+        WeatherDto dto = new WeatherDto(28.5,77.1,"Asia/Kolkata",30.0,32.0,65.0,0.0,5.0,1,"Mainly clear","2026-09-01T10:00");
+        when(openMeteoClient.getCurrentWeather(28.5,77.1)).thenReturn(dto);
+        var res = service.getByCoordinates(28.5,77.1);
+        assertThat(res.temperature()).isEqualTo(30.0);
     }
 
     @Test
