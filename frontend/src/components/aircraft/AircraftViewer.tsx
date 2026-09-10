@@ -55,8 +55,8 @@ function ProceduralAircraft() {
   );
 }
 
-function A320neoModel() {
-  const { scene } = useGLTF("/models/a320neo.glb");
+function AircraftModel({ modelKey }: { modelKey: string }) {
+  const { scene } = useGLTF(`/models/${modelKey}.glb`);
   const groupRef = useRef<THREE.Group>(null);
 
   const cloned = useMemo(() => {
@@ -65,12 +65,9 @@ function A320neoModel() {
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    // Target max dimension ~3 units to match previous procedural scale and fit viewer
     const scale = maxDim > 0 ? 3.0 / maxDim : 1;
     clone.scale.setScalar(scale);
-    // Center at origin after scaling
     clone.position.sub(center.clone().multiplyScalar(scale));
-    // Lift slightly so lowest point sits just above grid (grid at y=-0.5)
     const scaledBox = new THREE.Box3().setFromObject(clone);
     const yOffset = -scaledBox.min.y - 0.4;
     clone.position.y += yOffset;
@@ -101,7 +98,7 @@ class ModelErrorBoundary extends Component<{ fallback: ReactNode; children: Reac
     return { hasError: true };
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.warn("[AircraftViewer] A320neo GLB failed, falling back to procedural:", error.message, info.componentStack);
+    console.warn("[AircraftViewer] GLB failed, falling back to procedural:", error.message, info.componentStack);
   }
   render() {
     if (this.state.hasError) return this.props.fallback as ReactNode;
@@ -118,7 +115,7 @@ function Fallback() {
   );
 }
 
-export function AircraftViewer() {
+export function AircraftViewer({ modelKey = "a320neo" }: { modelKey?: string }) {
   return (
     <div className="h-[420px] w-full rounded-xl border bg-gradient-to-b from-background to-muted/20 overflow-hidden relative">
       <Canvas camera={{ position: [4, 2.5, 4], fov: 45 }} dpr={[1, 2]} gl={{ antialias: true }}>
@@ -127,7 +124,7 @@ export function AircraftViewer() {
         <directionalLight position={[-5, 3, -5]} intensity={0.5} />
         <Suspense fallback={<Fallback />}>
           <ModelErrorBoundary fallback={<ProceduralAircraft />}>
-            <A320neoModel />
+            <AircraftModel modelKey={modelKey} />
           </ModelErrorBoundary>
           <Grid position={[0, -0.5, 0]} args={[10, 10]} cellSize={0.5} cellThickness={1} cellColor="#e5e7eb" sectionSize={2} sectionThickness={1} sectionColor="#d1d5db" fadeDistance={12} />
           <Environment preset="city" />
